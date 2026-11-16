@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { Campaign, MailchimpData } from "@/app/api/mailchimp/route";
-import { BENCHMARKS, EXCLUDED_CAMPAIGN_WORDS } from "@/lib/constants";
+import { BENCHMARKS, EXCLUDED_CAMPAIGN_WORDS, MIN_BEST_CAMPAIGN_SENT } from "@/lib/constants";
 import { fmtDate, fmtInt, fmtPct, MONTHS } from "@/lib/formatters";
 import { useApi } from "@/lib/useApi";
 import ErrorState from "./ErrorState";
@@ -99,7 +99,7 @@ function Body({ data }: { data: MailchimpData }) {
   const periodOpen = avg(filtered.map((c) => c.openRate));
   const periodClick = avg(filtered.map((c) => c.clickRate));
   const best = useMemo(
-    () => filtered.filter((c) => !isExcluded(c.name)).sort((a, b) => b.openRate - a.openRate)[0],
+    () => filtered.filter((c) => !isExcluded(c.name) && c.emailsSent >= MIN_BEST_CAMPAIGN_SENT).sort((a, b) => b.openRate - a.openRate)[0],
     [filtered],
   );
   const filterActive = Boolean(year || month);
@@ -122,7 +122,7 @@ function Body({ data }: { data: MailchimpData }) {
           <Card
             label="Best Campaign (selected period)"
             value={best ? fmtPct(best.openRate) : "—"}
-            note={best ? best.name : "No campaigns in this period"}
+            note={best ? best.name : "No qualifying campaign (100+ emails sent) in this period"}
           />
         </div>
       </section>

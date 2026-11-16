@@ -31,3 +31,9 @@
 - `GET/PATCH/POST /api/documents`: summary cards that filter the list, inline editing of title/purpose/link, status dropdown, "+ Add Document" (appends a Pending Review row; links must be http/https)
 - `GET/PATCH /api/gail-approval`: Needs Gail / In Review / Done / Not Needed cards, editable status and notes; shown as its own sidebar item under Documents
 - All writes validate row, a name guard against stale rows, allowed fields/statuses, and payload types
+
+### Phase 6 — Overview
+- Overview page: 8 stat cards (Mailchimp, Revenue, HubSpot, Leads), each source fetched independently; a failing source shows "Unable to load" + Retry on its own cards only
+- Smart Insights computed from whichever sources loaded
+- `GET /api/hubspot` (parses the stacked CONTACTS / COMPANIES sections; ignores HubSpot's sample contacts)
+- "Best campaign" now requires 100+ emails sent (Overview and Mailchimp) so tiny sends can't top the ranking

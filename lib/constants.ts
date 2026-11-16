@@ -1,6 +1,7 @@
 export const SHEET_TABS = {
   mailchimp: "Mailchimp",
   leads: "Leads",
+  hubspot: "Hubspot",
   documents: "Documents",
   gailApproval: "Gail Approval",
   calendar: "Campaign Calendar",
@@ -36,6 +37,9 @@ export const NAV = [
 export type IconName = (typeof NAV)[number]["items"][number]["icon"];
 
 /** Campaigns whose names contain these words never count as "best campaign". */
+/** A campaign must reach at least this many people to be called a "best" campaign. */
+export const MIN_BEST_CAMPAIGN_SENT = 100;
+
 export const EXCLUDED_CAMPAIGN_WORDS = ["preview", "test", "resend", "admin test"];
 
 export interface Benchmark {
