@@ -1,157 +1,167 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CalendarItem } from "@/app/api/campaign-calendar/route";
-import { LEAD_STATUSES, type LeadStatus } from "@/lib/leadTypes";
-import { fmtInt } from "@/lib/formatters";
+import { type LeadStatus } from "@/lib/leadTypes";
+import { sendJson } from "@/lib/sendJson";
 import { useApi } from "@/lib/useApi";
 import ErrorState from "./ErrorState";
-import Header from "./Header";
 import LoadingState from "./LoadingState";
 
 type Filter = LeadStatus | "All Statuses";
 
-const statusCls = (s: LeadStatus) =>
-  s === "Approved" ? "bg-good text-white" : s === "Not Approved" ? "bg-bad text-white" : "bg-surface text-ink border border-line";
-
-async function patch(body: object) {
-  const res = await fetch("/api/campaign-calendar", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const j = await res.json().catch(() => null);
-  if (!res.ok || !j?.success) throw new Error(j?.error || "Unable to save.");
-}
+const drivePreview = (url: string) => {
+  const m = url.match(/drive\.google\.com\/(?:file\/d\/|open\?id=)([-\w]+)/);
+  return m ? `https://drive.google.com/file/d/${m[1]}/preview` : "";
+};
 
 export default function CampaignCalendar() {
   const { state, retry } = useApi<{ items: CalendarItem[] }>("/api/campaign-calendar", "Campaign Calendar");
-  return (
-    <>
-      <Header title="Campaign Calendar" subtitle="Planned email campaigns for Gail's review" />
-      {state.status === "loading" && <LoadingState label="Loading Campaign Calendar…" cards={3} />}
-      {state.status === "error" && <ErrorState message={`Unable to load the Campaign Calendar. ${state.error}`} onRetry={retry} />}
-      {state.status === "ready" && <Body initial={state.data.items} />}
-    </>
-  );
+  if (state.status === "loading") return <LoadingState label="Loading Campaign Calendar…" cards={3} />;
+  if (state.status === "error") return <ErrorState message={`Unable to load the Campaign Calendar. ${state.error}`} onRetry={retry} />;
+  return <Body initial={state.data.items} />;
 }
 
 function Body({ initial }: { initial: CalendarItem[] }) {
   const [items, setItems] = useState(initial);
   const [filter, setFilter] = useState<Filter>("Pending Review");
+  const [openRow, setOpenRow] = useState<number | null>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+  const [err, setErr] = useState("");
   const visible = items.filter((i) => filter === "All Statuses" || i.status === filter);
   const update = (row: number, p: Partial<CalendarItem>) => setItems((xs) => xs.map((x) => (x.row === row ? { ...x, ...p } : x)));
-  const count = (s: LeadStatus) => items.filter((i) => i.status === s).length;
+  const open = items.find((i) => i.row === openRow) ?? null;
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3" role="group" aria-label="Filter by status">
-        {([...LEAD_STATUSES, "All Statuses"] as Filter[]).map((f) => (
-          <button
-            key={f}
-            aria-pressed={filter === f}
-            onClick={() => setFilter(f)}
-            className={`rounded-lg border-2 px-4 py-3 text-base font-semibold ${filter === f ? "border-navy bg-navy text-white" : "border-line bg-white hover:border-teal"}`}
-          >
-            {f} {f === "All Statuses" ? `(${fmtInt(items.length)})` : `(${fmtInt(count(f))})`}
-          </button>
-        ))}
-      </div>
-
-      <div className="overflow-x-auto rounded-xl border border-line bg-white">
-        <table className="w-full text-left text-base">
-          <thead className="bg-surface text-sm uppercase tracking-wide text-muted">
-            <tr>
-              <th className="p-4">Month</th>
-              <th className="p-4">Segment</th>
-              <th className="p-4">Type</th>
-              <th className="p-4">Theme / Subject</th>
-              <th className="p-4 min-w-72">Gail&apos;s Feedback</th>
-              <th className="p-4">Status</th>
-              <th className="p-4">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visible.length === 0 && <tr><td colSpan={7} className="p-6 text-muted">No campaigns match this filter.</td></tr>}
-            {visible.map((i) => (
-              <Row key={i.row} item={i} onChange={(p) => update(i.row, p)} />
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function Row({ item, onChange }: { item: CalendarItem; onChange: (p: Partial<CalendarItem>) => void }) {
-  const [draft, setDraft] = useState(item.feedback);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const dirty = draft !== item.feedback;
-  const pdf = item.pdfUrl.startsWith("https://drive.google.com/") ? item.pdfUrl : "";
-
-  async function run(body: object, apply: () => void, okText: string) {
-    setBusy(true);
-    setMsg(null);
+  async function setStatus(i: CalendarItem, status: LeadStatus) {
+    setBusy(i.row);
+    setErr("");
     try {
-      await patch({ row: item.row, theme: item.theme, ...body });
-      apply();
-      setMsg({ ok: true, text: okText });
+      await sendJson("/api/campaign-calendar", "PATCH", { row: i.row, theme: i.theme, status });
+      update(i.row, { status });
     } catch (e) {
-      setMsg({ ok: false, text: (e as Error).message });
+      setErr((e as Error).message);
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
   return (
-    <tr className="border-t border-line align-top">
-      <td className="p-4 whitespace-nowrap font-semibold">{item.month}</td>
-      <td className="p-4">{item.segment}</td>
-      <td className="p-4">{item.type}</td>
-      <td className="p-4 max-w-md">
-        <p className="font-bold text-navy">{item.theme}</p>
-        {item.description && <p className="mt-1 text-sm text-muted">{item.description}</p>}
-        {item.timing && <p className="mt-1 text-sm text-muted">Timing: {item.timing}</p>}
-        {pdf && <a href={pdf} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block font-semibold text-navy underline">View draft</a>}
-      </td>
-      <td className="p-4">
-        <textarea
-          aria-label={`Gail's feedback for ${item.theme}`}
-          value={draft}
-          onChange={(e) => { setDraft(e.target.value); setMsg(null); }}
-          rows={3}
-          maxLength={5000}
-          className="w-full rounded-lg border-2 border-line bg-white p-3 text-base text-ink"
-        />
-        <button
-          disabled={!dirty || busy}
-          onClick={() => run({ feedback: draft }, () => onChange({ feedback: draft }), "Feedback saved.")}
-          className="mt-2 rounded-lg border-2 border-navy px-4 py-2 text-base font-semibold text-navy hover:bg-surface disabled:opacity-40"
-        >
-          Save feedback
-        </button>
-        {msg && <p role={msg.ok ? "status" : "alert"} className={`mt-1 text-sm font-semibold ${msg.ok ? "text-good" : "text-bad"}`}>{msg.text}</p>}
-      </td>
-      <td className="p-4"><span className={`whitespace-nowrap rounded-full px-3 py-1 text-sm font-bold ${statusCls(item.status)}`}>{item.status}</span></td>
-      <td className="p-4">
-        <div className="flex flex-col gap-2">
-          <button
-            disabled={busy}
-            onClick={() => run({ status: "Approved" }, () => onChange({ status: "Approved" }), "Marked Approved.")}
-            className="rounded-lg bg-good px-4 py-3 text-base font-bold text-white hover:opacity-90 disabled:opacity-50"
-          >
-            ✓ Approve
-          </button>
-          <button
-            disabled={busy}
-            onClick={() => run({ status: "Not Approved" }, () => onChange({ status: "Not Approved" }), "Marked Not Approved.")}
-            className="rounded-lg bg-bad px-4 py-3 text-base font-bold text-white hover:opacity-90 disabled:opacity-50"
-          >
-            Not Approved
-          </button>
+    <>
+      <div className="sec-h" style={{ marginTop: 0 }}>
+        <h2>Campaign Calendar</h2>
+        <span className="hint">{visible.length} of {items.length} campaign{items.length === 1 ? "" : "s"} shown</span>
+        <span className="spacer" />
+        <select className="pill-sel" style={{ marginLeft: 0 }} aria-label="Status filter" value={filter} onChange={(e) => setFilter(e.target.value as Filter)}>
+          <option>Pending Review</option><option>Approved</option><option>Not Approved</option><option>All Statuses</option>
+        </select>
+      </div>
+      {err && <p role="alert" style={{ color: "var(--bad)", fontWeight: 700 }}>{err}</p>}
+      <div className="panel" style={{ overflow: "auto" }}>
+        <table className="stable">
+          <thead><tr><th>Month</th><th>Segment</th><th>Type</th><th>Theme / Subject</th><th>Gail&apos;s Feedback</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody>
+            {visible.length === 0 && <tr><td colSpan={7} className="empty">No campaigns match this status filter.</td></tr>}
+            {visible.map((i) => (
+              <tr key={i.row} className="row-clickable" onClick={() => setOpenRow(i.row)}>
+                <td className="snm">{i.month}</td>
+                <td className="subj">{i.segment}</td>
+                <td className="subj">{i.type}</td>
+                <td>{i.theme}</td>
+                <td onClick={(e) => e.stopPropagation()}><Feedback item={i} onSaved={(f) => update(i.row, { feedback: f })} /></td>
+                <td><span className={`badge ${i.status === "Approved" ? "b-green" : i.status === "Not Approved" ? "b-red" : "b-gray"}`}>{i.status}</span></td>
+                <td style={{ minWidth: 118 }} onClick={(e) => e.stopPropagation()}>
+                  {i.status === "Pending Review" ? (
+                    <>
+                      <button className="btn-app" disabled={busy === i.row} onClick={() => setStatus(i, "Approved")}>✓ Approve</button>
+                      <button className="btn-rej" disabled={busy === i.row} onClick={() => setStatus(i, "Not Approved")}>Not Approved</button>
+                    </>
+                  ) : (
+                    <>
+                      <span className={i.status === "Approved" ? "st-app" : "st-rej"}>{i.status === "Approved" ? "✓ Approved" : "✕ Not Approved"}</span>
+                      <button className="btn-undo-s" disabled={busy === i.row} onClick={() => setStatus(i, "Pending Review")}>Undo</button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {open && <CalModal item={open} busy={busy === open.row} onClose={() => setOpenRow(null)} onStatus={(s) => setStatus(open, s)} />}
+    </>
+  );
+}
+
+function Feedback({ item, onSaved }: { item: CalendarItem; onSaved: (f: string) => void }) {
+  const [draft, setDraft] = useState(item.feedback);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; t: string } | null>(null);
+  async function save() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await sendJson("/api/campaign-calendar", "PATCH", { row: item.row, theme: item.theme, feedback: draft });
+      onSaved(draft);
+      setMsg({ ok: true, t: "Saved" });
+    } catch (e) {
+      setMsg({ ok: false, t: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <textarea className="fb-input" aria-label={`Gail's feedback for ${item.theme}`} placeholder="Add Gail's feedback..." maxLength={5000} value={draft} onChange={(e) => { setDraft(e.target.value); setMsg(null); }} />
+      <button className="mini-btn" disabled={busy || draft === item.feedback} onClick={save}>Save feedback</button>
+      {msg && <div role={msg.ok ? "status" : "alert"} className={`save-msg ${msg.ok ? "ok" : "err"}`}>{msg.t}</div>}
+    </>
+  );
+}
+
+function CalModal({ item, busy, onClose, onStatus }: { item: CalendarItem; busy: boolean; onClose: () => void; onStatus: (s: LeadStatus) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    ref.current?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = ""; prev?.focus(); };
+  }, [onClose]);
+  const preview = drivePreview(item.pdfUrl);
+  const fields: [string, string, boolean][] = [["Description", item.description, true], ["Timing", item.timing, false], ["Format", item.format, false]];
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="cal-title" className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div className="m-id">{[item.segment, item.type].filter(Boolean).join(" · ")}</div>
+          <div className="m-info"><h3 id="cal-title">{item.theme}</h3><div className="m-meta">{item.month}</div></div>
+          <button className="m-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
-      </td>
-    </tr>
+        <div className="m-fields">
+          {fields.filter(([, v]) => v).map(([l, v, full]) => <div key={l} className={`mf${full ? " full" : ""}`}><div className="mf-lbl">{l}</div><div className="mf-val">{v}</div></div>)}
+        </div>
+        <div className="m-actions">
+          {item.status === "Pending Review" ? (
+            <>
+              <button className="m-btn approve" disabled={busy} onClick={() => onStatus("Approved")}>✓ Approve Campaign</button>
+              <button className="m-btn reject" disabled={busy} onClick={() => onStatus("Not Approved")}>✕ Not Approved</button>
+            </>
+          ) : (
+            <>
+              <button className="m-btn" disabled style={{ background: "#eaf5f6", border: "1px solid #b8dadd", color: "#397f89" }}>{item.status === "Approved" ? "✓ Approved" : "✕ Not Approved"}</button>
+              <button className="m-btn" disabled={busy} style={{ background: "#fff", border: "2px solid #f27b5c", color: "#bd4e31" }} onClick={() => onStatus("Pending Review")}>↩ Undo</button>
+            </>
+          )}
+        </div>
+        {preview && (
+          <div className="m-pdf">
+            <div className="mf-lbl">📄 {item.month} newsletter draft</div>
+            <iframe src={preview} title={`${item.theme} draft`} allowFullScreen />
+            <div style={{ marginTop: 10 }}><a href={item.pdfUrl} target="_blank" rel="noopener noreferrer">↗ Open PDF in a new tab</a></div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

@@ -6,38 +6,30 @@ import type { MailchimpData } from "@/app/api/mailchimp/route";
 import type { GailItem } from "@/lib/docTypes";
 import type { Lead } from "@/lib/leadTypes";
 import type { SalesHoursData } from "@/lib/salesTypes";
+import { Sparkline } from "@/lib/spark";
 import { BENCHMARKS, EXCLUDED_CAMPAIGN_WORDS, MIN_BEST_CAMPAIGN_SENT } from "@/lib/constants";
-import { fmtDate, fmtInt, fmtMoney, fmtPct } from "@/lib/formatters";
+import { fmtDate, fmtHours, fmtInt, fmtMoney, fmtPct } from "@/lib/formatters";
 import { useApi } from "@/lib/useApi";
-import Header from "./Header";
 
-type Api<T> = ReturnType<typeof useApi<T>>["state"];
+type Api<T> = ReturnType<typeof useApi<T>>;
 
-function StatCard<T>({ label, api, retry, pick, note }: {
-  label: string;
-  api: Api<T>;
-  retry: () => void;
-  pick: (d: T) => string;
-  note?: (d: T) => string | undefined;
+function StatCard<T>({ icon, label, api, pick, note, spark }: {
+  icon: string; label: string; api: Api<T>;
+  pick: (d: T) => string; note?: (d: T) => string | undefined; spark?: (d: T) => React.ReactNode;
 }) {
+  const s = api.state;
   return (
-    <div className="rounded-xl border border-line bg-white p-5">
-      <p className="text-base font-semibold text-muted">{label}</p>
-      {api.status === "loading" && (
-        <div role="status" aria-label={`Loading ${label}`} className="mt-2 animate-pulse">
-          <div className="h-9 w-3/4 rounded bg-line" />
-        </div>
+    <div className="card">
+      <div className="card-top"><div className="card-lbl">{label}</div><div aria-hidden>{icon}</div></div>
+      {s.status === "loading" && <div role="status" aria-label={`Loading ${label}`}><div className="skel" style={{ height: 30, width: "70%" }} /></div>}
+      {s.status === "error" && (
+        <div role="alert" className="card-err">Unable to load<button onClick={api.retry}>Retry</button></div>
       )}
-      {api.status === "error" && (
-        <div role="alert" className="mt-1">
-          <p className="text-base font-semibold text-bad">Unable to load</p>
-          <button onClick={retry} className="mt-1 text-base font-semibold text-navy underline">Retry</button>
-        </div>
-      )}
-      {api.status === "ready" && (
+      {s.status === "ready" && (
         <>
-          <p className="mt-1 text-3xl font-bold text-navy">{pick(api.data)}</p>
-          {note && <p className="mt-1 text-sm text-muted">{note(api.data)}</p>}
+          <div className="card-val">{pick(s.data)}</div>
+          {note && <div className="card-sub">{note(s.data)}</div>}
+          {spark && spark(s.data)}
         </>
       )}
     </div>
@@ -55,71 +47,95 @@ export default function Overview() {
   const gail = useApi<{ items: GailItem[] }>("/api/gail-approval", "Gail Approval");
   const cal = useApi<{ items: CalendarItem[] }>("/api/campaign-calendar", "Campaign Calendar");
 
-  // Smart Insights: each one is built only from sources that loaded.
-  const insights: { text: string; href?: string }[] = [];
   const m = mc.state.status === "ready" ? mc.state.data : null;
+  const L = leads.state.status === "ready" ? leads.state.data.leads : null;
+  const S = sales.state.status === "ready" ? sales.state.data : null;
+  const H = hs.state.status === "ready" ? hs.state.data : null;
+  const G = gail.state.status === "ready" ? gail.state.data.items : null;
+  const C = cal.state.status === "ready" ? cal.state.data.items : null;
+
+  const best = m?.campaigns.filter((c) => !isExcluded(c.name) && c.emailsSent >= MIN_BEST_CAMPAIGN_SENT).sort((a, b) => b.openRate - a.openRate)[0];
+  const pending = L?.filter((l) => l.status === "Pending Review").length ?? 0;
+  const approved = L?.filter((l) => l.status === "Approved").length ?? 0;
+  const topClient = S ? [...S.clients].sort((a, b) => b.qbBilled - a.qbBilled)[0] : null;
+
+  // Smart insights: built only from sources that loaded
+  const insights: { icon: string; tag: string; body: React.ReactNode }[] = [];
   if (m && m.campaigns.length) {
     const latest = [...m.campaigns].sort((a, b) => b.date.localeCompare(a.date))[0];
     const d = latest.openRate - m.avgOpenRate;
-    insights.push({ text: `Your latest campaign, “${latest.name}” (${fmtDate(latest.date)}), opened at ${fmtPct(latest.openRate)} — ${Math.abs(d).toFixed(2)} points ${d >= 0 ? "above" : "below"} your overall average of ${fmtPct(m.avgOpenRate)}.`, href: "/mailchimp" });
     const all = BENCHMARKS.find((b) => b.industry === "All Users")!;
     const dd = m.avgOpenRate - all.open;
-    insights.push({ text: `Your average open rate is ${Math.abs(dd).toFixed(2)} points ${dd >= 0 ? "above" : "below"} the Mailchimp all-users benchmark of ${fmtPct(all.open)}.`, href: "/mailchimp" });
-    const best = m.campaigns.filter((c) => !isExcluded(c.name) && c.emailsSent >= MIN_BEST_CAMPAIGN_SENT).sort((a, b) => b.openRate - a.openRate)[0];
-    if (best) insights.push({ text: `Best-performing campaign (sent to 100+ people): “${best.name}” at ${fmtPct(best.openRate)} open rate.`, href: "/mailchimp" });
+    insights.push({ icon: "✉️", tag: "Mailchimp", body: <><b>{fmtInt(m.subscribers)}</b> subscribers with an average open rate of <b>{fmtPct(m.avgOpenRate)}</b> and click rate of <b>{fmtPct(m.avgClickRate)}</b>. Your latest campaign opened at <b>{fmtPct(latest.openRate)}</b> ({Math.abs(d).toFixed(2)} pts {d >= 0 ? "above" : "below"} average). Overall average is {Math.abs(dd).toFixed(2)} pts {dd >= 0 ? "above" : "below"} the Mailchimp all-users benchmark.</> });
   }
-  if (leads.state.status === "ready") {
-    const L = leads.state.data.leads;
-    const pending = L.filter((l) => l.status === "Pending Review").length;
-    const hotApproved = L.filter((l) => l.status === "Approved" && l.rating.toLowerCase() === "hot").length;
-    insights.push({ text: pending ? `${plural(pending, "lead")} waiting for review.` : `No leads are waiting for review. ${plural(hotApproved, "approved lead")} ${hotApproved === 1 ? "is" : "are"} rated Hot.`, href: "/leads" });
+  if (H) insights.push({ icon: "🧩", tag: "HubSpot", body: <><b>{fmtInt(H.companies)}</b> companies are loaded in CRM with <b>{fmtInt(H.contacts)}</b> contacts.</> });
+  if (S) insights.push({ icon: "💰", tag: "Revenue", body: <><b>{fmtMoney(S.summary.totalRevenueBilled)}</b> billed ({S.qbPeriod}). FunctionFox shows <b>{fmtHours(S.summary.totalTrackedHours)}</b> hours and <b>{fmtMoney(S.summary.trackedFees)}</b> in tracked fees; <b>{fmtMoney(S.summary.unbilledTrackedWork)}</b> of tracked work has no matching QuickBooks billing.</> });
+  if (L) insights.push({ icon: "🎯", tag: "Leads", body: <><b>{fmtInt(pending)}</b> leads are pending review, <b>{fmtInt(approved)}</b> are approved, and <b>{fmtInt(L.filter((l) => l.rating.toLowerCase() === "hot").length)}</b> are rated Hot.</> });
+  if (G) {
+    const n = G.filter((i) => i.status === "Needs Gail").length;
+    insights.push({ icon: "📝", tag: "Gail Approval", body: n ? <><b>{plural(n, "item")}</b> need Gail&apos;s attention.</> : <>Nothing is waiting on Gail.</> });
   }
-  if (sales.state.status === "ready") {
-    const s = sales.state.data;
-    if (s.summary.unbilledTrackedWork > 0) insights.push({ text: `${fmtMoney(s.summary.unbilledTrackedWork)} of tracked FunctionFox work has no matching QuickBooks billing.`, href: "/sales-hours" });
-    insights.push({ text: `QuickBooks billing is ${fmtMoney(Math.abs(s.summary.revenueGap))} ${s.summary.revenueGap >= 0 ? "above" : "below"} FunctionFox tracked fees.`, href: "/sales-hours" });
+  if (C) {
+    const n = C.filter((i) => i.status === "Pending Review").length;
+    if (n) insights.push({ icon: "📅", tag: "Campaign Calendar", body: <><b>{plural(n, "campaign")}</b> in the Campaign Calendar {n === 1 ? "is" : "are"} awaiting review.</> });
   }
-  if (gail.state.status === "ready") {
-    const n = gail.state.data.items.filter((i) => i.status === "Needs Gail").length;
-    insights.push({ text: n ? `${plural(n, "item")} need${n === 1 ? "s" : ""} Gail's attention.` : "Nothing is waiting on Gail.", href: "/gail-approval" });
-  }
-  if (cal.state.status === "ready") {
-    const n = cal.state.data.items.filter((i) => i.status === "Pending Review").length;
-    if (n) insights.push({ text: `${plural(n, "campaign")} in the Campaign Calendar ${n === 1 ? "is" : "are"} awaiting review.`, href: "/campaign-calendar" });
-  }
-  const loading = [mc, leads, sales, gail, cal].some((x) => x.state.status === "loading");
-  const failed = [mc, leads, sales, gail, cal].some((x) => x.state.status === "error");
+  const loading = [mc, leads, sales, gail, cal, hs].some((x) => x.state.status === "loading");
+  const failed = [mc, leads, sales, gail, cal, hs].some((x) => x.state.status === "error");
 
   return (
     <>
-      <Header title="Overview" subtitle="Where things stand today" />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Mailchimp Subscribers" api={mc.state} retry={mc.retry} pick={(d) => fmtInt(d.subscribers)} note={(d) => d.audience} />
-        <StatCard label="Average Open Rate" api={mc.state} retry={mc.retry} pick={(d) => fmtPct(d.avgOpenRate)} note={() => "All campaigns"} />
-        <StatCard label="Average Click Rate" api={mc.state} retry={mc.retry} pick={(d) => fmtPct(d.avgClickRate)} note={() => "All campaigns"} />
-        <StatCard label="Campaigns Sent" api={mc.state} retry={mc.retry} pick={(d) => fmtInt(d.campaignsSent)} note={(d) => (d.lastCampaign ? `Last sent ${fmtDate(d.lastCampaign)}` : undefined)} />
-        <StatCard label="Revenue Billed" api={sales.state} retry={sales.retry} pick={(d) => fmtMoney(d.summary.totalRevenueBilled)} note={(d) => `QuickBooks, ${d.qbPeriod}`} />
-        <StatCard label="HubSpot Companies" api={hs.state} retry={hs.retry} pick={(d) => fmtInt(d.companies)} note={(d) => `${fmtInt(d.contacts)} contacts`} />
-        <StatCard label="Leads Pending" api={leads.state} retry={leads.retry} pick={(d) => fmtInt(d.leads.filter((l) => l.status === "Pending Review").length)} note={(d) => `of ${fmtInt(d.leads.length)} leads`} />
-        <StatCard label="Leads Approved" api={leads.state} retry={leads.retry} pick={(d) => fmtInt(d.leads.filter((l) => l.status === "Approved").length)} note={(d) => `${fmtInt(d.leads.filter((l) => l.status === "Not Approved").length)} not approved`} />
+      <div className="panel hero">
+        <div className="hero-top">
+          <div>
+            <div className="kicker">Executive Dashboard</div>
+            <div className="hero-title">A visual snapshot of Cowley&apos;s marketing, pipeline, and revenue performance.</div>
+            <div className="hero-sub">See the health of the newsletter audience, CRM, lead review queue, and revenue drivers in one overview built for quick scanning.</div>
+          </div>
+          <div className="badges">
+            <div className="hbadge"><div className="hbadge-lbl">Audience</div><div className="hbadge-val">{m ? `${fmtInt(m.subscribers)} subscribers` : "—"}</div></div>
+            <div className="hbadge"><div className="hbadge-lbl">Pipeline</div><div className="hbadge-val">{L ? `${fmtInt(pending)} pending review` : "—"}</div></div>
+          </div>
+        </div>
       </div>
 
-      <section aria-label="Smart Insights" className="mt-10">
-        <h2 className="mb-3 text-2xl font-bold text-navy">Smart Insights</h2>
-        <div className="rounded-xl border border-line bg-white p-6">
-          {loading && insights.length === 0 && <p role="status" className="text-lg text-muted">Loading insights…</p>}
-          {!loading && insights.length === 0 && <p className="text-lg text-muted">No insights are available right now.</p>}
-          <ul className="space-y-4">
+      <div className="grid4">
+        <StatCard icon="👥" label="Total Subscribers" api={mc} pick={(d) => fmtInt(d.subscribers)} note={(d) => d.audience} />
+        <StatCard icon="💵" label="Revenue Billed" api={sales} pick={(d) => fmtMoney(d.summary.totalRevenueBilled)} note={(d) => `QuickBooks, ${d.qbPeriod}`} />
+        <StatCard icon="📝" label="Leads Pending" api={leads} pick={(d) => fmtInt(d.leads.filter((l) => l.status === "Pending Review").length)} note={() => "Awaiting Gail's review"} />
+        <StatCard icon="✅" label="Leads Approved" api={leads} pick={(d) => fmtInt(d.leads.filter((l) => l.status === "Approved").length)} note={(d) => `${fmtInt(d.leads.filter((l) => l.status === "Not Approved").length)} not approved`} />
+      </div>
+      <div className="grid4">
+        <StatCard icon="📬" label="Avg Open Rate" api={mc} pick={(d) => fmtPct(d.avgOpenRate)} note={() => "All campaigns"}
+          spark={(d) => <Sparkline data={[...d.campaigns].sort((a, b) => a.date.localeCompare(b.date)).map((c) => c.openRate)} color="#5a9fa9" />} />
+        <StatCard icon="🖱️" label="Avg Click Rate" api={mc} pick={(d) => fmtPct(d.avgClickRate)} note={() => "All campaigns"}
+          spark={(d) => <Sparkline data={[...d.campaigns].sort((a, b) => a.date.localeCompare(b.date)).map((c) => c.clickRate)} color="#f27b5c" />} />
+        <StatCard icon="🧩" label="HubSpot Companies" api={hs} pick={(d) => fmtInt(d.companies)} note={(d) => `${fmtInt(d.contacts)} contacts`} />
+        <StatCard icon="⏱️" label="Function Fox" api={sales} pick={(d) => `${fmtHours(d.summary.totalTrackedHours)} hrs`} note={(d) => `${fmtMoney(d.summary.trackedFees)} total fees`} />
+      </div>
+
+      <div className="two-col">
+        <div className="panel">
+          <div className="sec-h" style={{ margin: "0 0 12px" }}><h2>Smart Insights</h2></div>
+          <div className="ins-list">
+            {loading && insights.length === 0 && <p role="status" className="hint">Loading insights…</p>}
+            {!loading && insights.length === 0 && <p className="hint">No insights are available right now.</p>}
             {insights.map((i) => (
-              <li key={i.text} className="flex gap-3 text-lg">
-                <span aria-hidden className="mt-2 h-3 w-3 shrink-0 rounded-full bg-teal" />
-                <span>{i.text}{i.href && <> <a href={i.href} className="font-semibold text-navy underline">Open</a></>}</span>
-              </li>
+              <div key={i.tag} className="ins-card"><div className="ins-ic" aria-hidden>{i.icon}</div><div className="ins-copy"><span className="ins-tag">{i.tag}</span>{i.body}</div></div>
             ))}
-          </ul>
-          {failed && !loading && <p className="mt-4 text-base text-muted">Some insights are unavailable because a data source did not load.</p>}
+            {failed && !loading && <p className="hint">Some insights are unavailable because a data source did not load.</p>}
+          </div>
         </div>
-      </section>
+        <div className="panel">
+          <div className="sec-h" style={{ margin: "0 0 12px" }}><h2>Key Highlights</h2><span className="hint">Top items at a glance</span></div>
+          <div className="high-list">
+            {best && <div className="high-item"><div className="high-lbl">Best Campaign</div><div className="high-main">{best.name}</div><div className="high-sub">{fmtDate(best.date)} · {fmtPct(best.openRate)} open rate · {fmtInt(best.clicks)} clicks</div></div>}
+            {topClient && <div className="high-item"><div className="high-lbl">Top Revenue Customer</div><div className="high-main">{topClient.name}</div><div className="high-sub">{fmtMoney(topClient.qbBilled)} billed</div></div>}
+            {L && <div className="high-item"><div className="high-lbl">Lead Review Queue</div><div className="high-main"><span className="chip">{fmtInt(pending)} pending</span><span className="chip">{fmtInt(approved)} approved</span></div><div className="high-sub">Review pending leads first, then move approved leads into outreach.</div></div>}
+            {S && <div className="high-item"><div className="high-lbl">Function Fox Summary</div><div className="high-main">{fmtHours(S.summary.totalTrackedHours)} hours logged</div><div className="high-sub">{fmtMoney(S.summary.trackedFees)} total fees recorded.</div></div>}
+            {!best && !topClient && !L && !S && <p className="hint">{loading ? "Loading…" : "No highlights available."}</p>}
+          </div>
+        </div>
+      </div>
     </>
   );
 }

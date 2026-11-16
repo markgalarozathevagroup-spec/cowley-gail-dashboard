@@ -37,3 +37,11 @@
 - Smart Insights computed from whichever sources loaded
 - `GET /api/hubspot` (parses the stacked CONTACTS / COMPANIES sections; ignores HubSpot's sample contacts)
 - "Best campaign" now requires 100+ emails sent (Overview and Mailchimp) so tiny sends can't top the ranking
+
+### Design port — Apps Script look and layout
+- Ported the Apps Script dashboard's design (Cowley teal theme, 220px sidebar with emoji nav, topbar with live tag, footer, Light/Dark toggle) into `app/globals.css`
+- Restyled every page to match: Overview (hero, stat cards with sparklines, Smart Insights, Key Highlights), Mailchimp (hero, snapshot panels, benchmark table, filters, sort, rate pills), Sales & Hours, Leads (banner, stat cards, segment pills, light modal with Pitch Intelligence), Campaign Calendar (feedback box, detail modal with newsletter PDF preview), Documents
+- New Hubspot page (Contacts / Companies tabs, search, sortable); `/api/hubspot` now also returns contacts
+- Gail Approval moved onto the Documents page (as in the Apps Script version); `/gail-approval` redirects there
+- Sidebar becomes a top bar on narrow screens instead of disappearing
+- Kept live-data behaviour: independent loading per section, error + Retry states, write-back to the sheets. Observation flags are calculated, not hard-coded. PDF upload to Drive was not ported (Apps Script only).

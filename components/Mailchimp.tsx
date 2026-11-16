@@ -2,15 +2,13 @@
 
 import { useMemo, useState } from "react";
 import type { Campaign, MailchimpData } from "@/app/api/mailchimp/route";
-import { BENCHMARKS, EXCLUDED_CAMPAIGN_WORDS, MIN_BEST_CAMPAIGN_SENT } from "@/lib/constants";
+import { BENCHMARKS } from "@/lib/constants";
 import { fmtDate, fmtInt, fmtPct, MONTHS } from "@/lib/formatters";
 import { useApi } from "@/lib/useApi";
 import ErrorState from "./ErrorState";
-import Header from "./Header";
 import LoadingState from "./LoadingState";
 
 type SortKey = "date" | "name" | "emailsSent" | "openRate" | "clickRate" | "uniqueOpens" | "clicks";
-type Dir = "desc" | "asc";
 
 const SORTS: { key: SortKey; label: string }[] = [
   { key: "date", label: "Date" },
@@ -22,238 +20,166 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: "clicks", label: "Clicks" },
 ];
 
-const isExcluded = (name: string) => {
-  const n = name.toLowerCase();
-  return EXCLUDED_CAMPAIGN_WORDS.some((w) => n.includes(w));
-};
-
 const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
-
-function Card({ label, value, note }: { label: string; value: string; note?: string }) {
-  return (
-    <div className="rounded-xl border border-line bg-white p-5">
-      <p className="text-base font-semibold text-muted">{label}</p>
-      <p className="mt-1 text-3xl font-bold text-navy">{value}</p>
-      {note && <p className="mt-1 text-sm text-muted">{note}</p>}
-    </div>
-  );
-}
-
-const selectCls = "rounded-lg border-2 border-line bg-white px-3 py-2.5 text-base text-ink";
-
-function Delta({ value, base }: { value: number; base: number }) {
-  const d = value - base;
-  const up = d >= 0;
-  return (
-    <span className={`block text-sm font-semibold ${up ? "text-good" : "text-bad"}`}>
-      {up ? "▲ +" : "▼ "}
-      {d.toFixed(2)} pts vs All Users
-    </span>
-  );
-}
+const pillCls = (n: number) => (n >= 3.5 ? "good" : n >= 1 ? "ok" : "low");
 
 export default function Mailchimp() {
   const { state, retry } = useApi<MailchimpData>("/api/mailchimp", "Mailchimp");
+  if (state.status === "loading") return <LoadingState label="Loading Mailchimp…" />;
+  if (state.status === "error") return <ErrorState message={`Unable to load Mailchimp data. ${state.error}`} onRetry={retry} />;
+  return <Body data={state.data} />;
+}
 
-  return (
-    <>
-      <Header title="Mailchimp" subtitle="Email newsletter audience and campaign performance" />
-      {state.status === "loading" && <LoadingState label="Loading Mailchimp…" />}
-      {state.status === "error" && (
-        <ErrorState message={`Unable to load Mailchimp data. ${state.error}`} onRetry={retry} />
-      )}
-      {state.status === "ready" && <Body data={state.data} />}
-    </>
-  );
+function Delta({ value, base }: { value: number; base: number }) {
+  const d = value - base;
+  return <span className={`delta ${d >= 0 ? "up" : "down"}`}>{d >= 0 ? "▲ +" : "▼ "}{d.toFixed(2)} pts vs All Users</span>;
 }
 
 function Body({ data }: { data: MailchimpData }) {
   const [year, setYear] = useState("");
   const [month, setMonth] = useState("");
+  const [q, setQ] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("date");
-  const [dir, setDir] = useState<Dir>("desc");
+  const [dir, setDir] = useState<"desc" | "asc">("desc");
 
-  const years = useMemo(
-    () => [...new Set(data.campaigns.map((c) => c.date.slice(0, 4)))].sort().reverse(),
-    [data.campaigns],
-  );
-
+  const years = useMemo(() => [...new Set(data.campaigns.map((c) => c.date.slice(0, 4)))].sort().reverse(), [data.campaigns]);
   const filtered = useMemo(
-    () =>
-      data.campaigns.filter(
-        (c) => (!year || c.date.slice(0, 4) === year) && (!month || c.date.slice(5, 7) === month),
-      ),
+    () => data.campaigns.filter((c) => (!year || c.date.slice(0, 4) === year) && (!month || c.date.slice(5, 7) === month)),
     [data.campaigns, year, month],
   );
-
-  const sorted = useMemo(() => {
+  const shown = useMemo(() => {
     const m = dir === "desc" ? -1 : 1;
-    return [...filtered].sort((a: Campaign, b: Campaign) => {
-      const av = a[sortKey];
-      const bv = b[sortKey];
-      const r = typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number);
-      return r * m;
-    });
-  }, [filtered, sortKey, dir]);
+    return filtered
+      .filter((c) => !q || c.name.toLowerCase().includes(q.toLowerCase()))
+      .sort((a: Campaign, b: Campaign) => {
+        const av = a[sortKey], bv = b[sortKey];
+        return (typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number)) * m;
+      });
+  }, [filtered, q, sortKey, dir]);
 
-  const periodOpen = avg(filtered.map((c) => c.openRate));
-  const periodClick = avg(filtered.map((c) => c.clickRate));
-  const best = useMemo(
-    () => filtered.filter((c) => !isExcluded(c.name) && c.emailsSent >= MIN_BEST_CAMPAIGN_SENT).sort((a, b) => b.openRate - a.openRate)[0],
-    [filtered],
-  );
-  const filterActive = Boolean(year || month);
-  const periodLabel = filterActive
-    ? `${month ? MONTHS[Number(month) - 1] : "All months"} ${year || "(all years)"}`
-    : "All time";
-  const allUsers = BENCHMARKS.find((b) => b.industry === "All Users")!;
+  const active = Boolean(year || month);
+  const openRate = active ? avg(filtered.map((c) => c.openRate)) : data.avgOpenRate;
+  const clickRate = active ? avg(filtered.map((c) => c.clickRate)) : data.avgClickRate;
+  const periodLabel = active ? `${month ? MONTHS[Number(month) - 1] : "All months"} ${year || ""}`.trim() : "";
+  const all = BENCHMARKS.find((b) => b.industry === "All Users")!;
+
+  const stats = [
+    { icon: "👥", label: "Subscribers", value: fmtInt(data.subscribers), sub: "Current active contacts on the list" },
+    { icon: "📤", label: "Unsubscribes", value: fmtInt(data.unsubscribes), sub: "Current all-time opt-outs" },
+    { icon: "🧹", label: "Cleaned", value: fmtInt(data.cleaned), sub: "Current cleaned contacts" },
+    { icon: "📈", label: "Avg Open / Click", value: `${fmtPct(openRate)} / ${fmtPct(clickRate)}`, sub: active ? "Average for selected period" : "All-time audience average" },
+  ];
+  const snapshot: [string, string][] = [
+    ["Audience Name", data.audience], ["Subscribers", fmtInt(data.subscribers)], ["Unsubscribes", fmtInt(data.unsubscribes)],
+    ["Cleaned Records", fmtInt(data.cleaned)], ["Campaigns Sent", fmtInt(data.campaignsSent)], ["Tracking Since", fmtDate(data.trackingSince)],
+  ];
 
   return (
-    <div className="space-y-8">
-      <section aria-label="Audience">
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Card label="Subscribers" value={fmtInt(data.subscribers)} note={data.audience} />
-          <Card label="Unsubscribes (all-time)" value={fmtInt(data.unsubscribes)} />
-          <Card label="Cleaned Contacts" value={fmtInt(data.cleaned)} />
-          <Card label="Campaigns Sent" value={fmtInt(data.campaignsSent)} note={data.lastCampaign ? `Last sent ${fmtDate(data.lastCampaign)}` : undefined} />
-          <Card label="Avg Open Rate" value={fmtPct(data.avgOpenRate)} note="All campaigns" />
-          <Card label="Avg Click Rate" value={fmtPct(data.avgClickRate)} note="All campaigns" />
-          <Card label="Tracking Since" value={fmtDate(data.trackingSince)} note="Audience created" />
-          <Card
-            label="Best Campaign (selected period)"
-            value={best ? fmtPct(best.openRate) : "—"}
-            note={best ? best.name : "No qualifying campaign (100+ emails sent) in this period"}
-          />
-        </div>
-      </section>
-
-      <section aria-label="Filters" className="rounded-xl border border-line bg-white p-5">
-        <div className="flex flex-wrap items-end gap-4">
-          <label className="text-base font-semibold">
-            Year
-            <select className={`${selectCls} mt-1 block`} value={year} onChange={(e) => setYear(e.target.value)}>
-              <option value="">All years</option>
-              {years.map((y) => <option key={y}>{y}</option>)}
-            </select>
-          </label>
-          <label className="text-base font-semibold">
-            Month
-            <select className={`${selectCls} mt-1 block`} value={month} onChange={(e) => setMonth(e.target.value)}>
-              <option value="">All months</option>
-              {MONTHS.map((m, i) => (
-                <option key={m} value={String(i + 1).padStart(2, "0")}>{m}</option>
-              ))}
-            </select>
-          </label>
-          <button
-            onClick={() => { setYear(""); setMonth(""); }}
-            className="rounded-lg border-2 border-navy px-5 py-2.5 text-base font-semibold text-navy hover:bg-surface"
-          >
-            Reset
-          </button>
-        </div>
-        <div className="mt-5 grid gap-4 sm:grid-cols-3">
-          <Card label={`Campaigns — ${periodLabel}`} value={fmtInt(filtered.length)} />
-          <Card label="Avg Open Rate — selected period" value={filtered.length ? fmtPct(periodOpen) : "—"} />
-          <Card label="Avg Click Rate — selected period" value={filtered.length ? fmtPct(periodClick) : "—"} />
-        </div>
-      </section>
-
-      <section aria-label="Recent campaigns">
-        <div className="mb-3 flex flex-wrap items-end justify-between gap-4">
-          <h2 className="text-2xl font-bold text-navy">Recent Campaigns</h2>
-          <div className="flex flex-wrap gap-3">
-            <label className="text-base font-semibold">
-              Sort by
-              <select className={`${selectCls} ml-2`} value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
-                {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-              </select>
-            </label>
-            <label className="text-base font-semibold">
-              Order
-              <select className={`${selectCls} ml-2`} value={dir} onChange={(e) => setDir(e.target.value as Dir)}>
-                <option value="desc">{sortKey === "date" ? "Newest first" : "Highest first"}</option>
-                <option value="asc">{sortKey === "date" ? "Oldest first" : "Lowest first"}</option>
-              </select>
-            </label>
+    <>
+      <div className="panel hero">
+        <div className="hero-top">
+          <div>
+            <div className="kicker">Mailchimp Audience Overview</div>
+            <div className="hero-title">{data.audience || "Cowley Audience"}</div>
+            <div className="hero-sub">List health, engagement, and recent campaign performance at a glance.</div>
+          </div>
+          <div className="badges">
+            <div className="hbadge"><div className="hbadge-lbl">Tracking Since</div><div className="hbadge-val">{fmtDate(data.trackingSince)}</div></div>
+            <div className="hbadge"><div className="hbadge-lbl">Last Campaign</div><div className="hbadge-val">{fmtDate(data.lastCampaign)}</div></div>
+            <div className="hbadge"><div className="hbadge-lbl">Campaigns Sent</div><div className="hbadge-val">{fmtInt(data.campaignsSent)}</div></div>
           </div>
         </div>
-        <div className="overflow-x-auto rounded-xl border border-line bg-white">
-          <table className="w-full text-left text-base">
-            <thead className="bg-surface text-sm uppercase tracking-wide text-muted">
-              <tr>
-                <th className="p-4">Campaign</th>
-                <th className="p-4">Date</th>
-                <th className="p-4 text-right">Emails Sent</th>
-                <th className="p-4 text-right">Open Rate</th>
-                <th className="p-4 text-right">Click Rate</th>
-                <th className="p-4 text-right">Unique Opens</th>
-                <th className="p-4 text-right">Clicks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.length === 0 && (
-                <tr><td colSpan={7} className="p-6 text-muted">No campaigns in the selected period.</td></tr>
-              )}
-              {sorted.map((c, i) => (
-                <tr key={`${c.name}-${c.date}-${i}`} className="border-t border-line">
-                  <td className="p-4 font-semibold">{c.name}</td>
-                  <td className="p-4 whitespace-nowrap">{fmtDate(c.date)}</td>
-                  <td className="p-4 text-right">{fmtInt(c.emailsSent)}</td>
-                  <td className="p-4 text-right">{fmtPct(c.openRate)}</td>
-                  <td className="p-4 text-right">{fmtPct(c.clickRate)}</td>
-                  <td className="p-4 text-right">{fmtInt(c.uniqueOpens)}</td>
-                  <td className="p-4 text-right">{fmtInt(c.clicks)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      </div>
 
-      <section aria-label="Industry comparison">
-        <h2 className="mb-3 text-2xl font-bold text-navy">Industry Performance Comparison</h2>
-        <div className="overflow-x-auto rounded-xl border border-line bg-white">
-          <table className="w-full text-left text-base">
-            <thead className="bg-surface text-sm uppercase tracking-wide text-muted">
-              <tr>
-                <th className="p-4">Industry</th>
-                <th className="p-4 text-right">Avg. Open Rate</th>
-                <th className="p-4 text-right">Avg. Click Rate</th>
-                <th className="p-4 text-right">Unsubscription Rate</th>
-              </tr>
-            </thead>
+      <div className="grid4">
+        {stats.map((s) => (
+          <div key={s.label} className="card">
+            <div className="card-top"><div className="card-lbl">{s.label}</div><div aria-hidden>{s.icon}</div></div>
+            <div className="card-val" style={{ fontSize: 26 }}>{s.value}</div>
+            <div className="card-sub">{s.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="two-col">
+        <div className="panel">
+          <div className="sec-h" style={{ margin: "0 0 12px" }}><h2>Audience Snapshot</h2><span className="hint">Core list health and activity</span></div>
+          <div className="mini-grid">{snapshot.map(([l, v]) => <div key={l} className="mini"><div className="mini-lbl">{l}</div><div className="mini-val">{v || "—"}</div></div>)}</div>
+        </div>
+        <div className="panel">
+          <div className="sec-h" style={{ margin: "0 0 12px" }}><h2>Performance Snapshot</h2><span className="hint">Based on average campaign performance</span></div>
+          <div className="perf-row"><div className="perf-head"><div className="perf-lbl">Average Open Rate</div><div className="perf-val">{fmtPct(openRate)}</div></div><div className="bar"><div className="bar-fill" style={{ width: `${Math.min(openRate, 100)}%` }} /></div></div>
+          <div className="perf-row"><div className="perf-head"><div className="perf-lbl">Average Click Rate</div><div className="perf-val">{fmtPct(clickRate)}</div></div><div className="bar"><div className="bar-fill" style={{ width: `${Math.min(clickRate * 6, 100)}%` }} /></div></div>
+          <div className="note">{active ? "Recalculated from campaigns in the selected Month / Year." : "Showing the overall Mailchimp audience averages."}</div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <div className="sec-h"><h2>Industry Performance Comparison</h2><span className="hint">Benchmark reference vs. Cowley performance</span></div>
+        <div className="panel" style={{ padding: 0, overflow: "auto" }}>
+          <table className="bench">
+            <thead><tr><th>Industry</th><th>Avg. Open Rate</th><th>Avg. Click Rate</th><th>Unsubscription Rate</th></tr></thead>
             <tbody>
-              <tr className="border-t border-line bg-surface/60">
-                <td className="p-4 font-bold">
-                  Cowley — {periodLabel}
-                  <span className="block text-sm font-normal text-muted">From your Mailchimp campaigns</span>
-                </td>
-                <td className="p-4 text-right font-bold">
-                  {filtered.length ? fmtPct(periodOpen) : "—"}
-                  {filtered.length > 0 && <Delta value={periodOpen} base={allUsers.open} />}
-                </td>
-                <td className="p-4 text-right font-bold">
-                  {filtered.length ? fmtPct(periodClick) : "—"}
-                  {filtered.length > 0 && <Delta value={periodClick} base={allUsers.click} />}
-                </td>
-                <td className="p-4 text-right text-muted">Not tracked per campaign</td>
+              <tr className="cowley">
+                <td>Cowley — {periodLabel || "All Time"}</td>
+                <td>{filtered.length ? fmtPct(openRate) : "—"}{filtered.length > 0 && <Delta value={openRate} base={all.open} />}</td>
+                <td>{filtered.length ? fmtPct(clickRate) : "—"}{filtered.length > 0 && <Delta value={clickRate} base={all.click} />}</td>
+                <td>—</td>
               </tr>
               {BENCHMARKS.map((b) => (
-                <tr key={b.industry} className="border-t border-line">
-                  <td className="p-4 font-semibold">
-                    {b.industry}
-                    <span className="block text-sm font-normal text-muted">{b.label}</span>
-                  </td>
-                  <td className="p-4 text-right">{fmtPct(b.open)}</td>
-                  <td className="p-4 text-right">{fmtPct(b.click)}</td>
-                  <td className="p-4 text-right">{fmtPct(b.unsub)}</td>
+                <tr key={b.industry}>
+                  <td className="industry">{b.industry}<div style={{ fontSize: 10, fontWeight: 600, opacity: 0.72, marginTop: 3 }}>{b.label}</div></td>
+                  <td>{fmtPct(b.open)}</td><td>{fmtPct(b.click)}</td><td>{fmtPct(b.unsub)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      </section>
-    </div>
+        <div className="note">Cowley&apos;s per-campaign unsubscribe rate is not tracked in the sheet. The Healthcare row is an external healthcare marketing benchmark, not a Mailchimp figure.</div>
+      </div>
+
+      <div className="date-filter">
+        <span className="slab" style={{ fontWeight: 700 }}>Filter campaigns:</span>
+        <select className="sel" aria-label="Year" value={year} onChange={(e) => setYear(e.target.value)}>
+          <option value="">All Years</option>{years.map((y) => <option key={y}>{y}</option>)}
+        </select>
+        <select className="sel" aria-label="Month" value={month} onChange={(e) => setMonth(e.target.value)}>
+          <option value="">All Months</option>{MONTHS.map((m, i) => <option key={m} value={String(i + 1).padStart(2, "0")}>{m}</option>)}
+        </select>
+        <button className="sel-btn" onClick={() => { setYear(""); setMonth(""); }}>Reset</button>
+        <span className="hint" style={{ marginLeft: "auto" }}>{active ? `Showing ${periodLabel}` : "Showing all campaign dates"}</span>
+      </div>
+
+      <div className="sec-h mt"><h2>Recent Campaigns</h2><span className="hint">{shown.length} campaign{shown.length === 1 ? "" : "s"}</span></div>
+      <div className="date-filter" style={{ margin: "0 0 12px" }}>
+        <span className="slab" style={{ fontWeight: 700 }}>Sort by:</span>
+        <select className="sel" aria-label="Sort field" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
+          {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+        <select className="sel" aria-label="Sort direction" value={dir} onChange={(e) => setDir(e.target.value as "asc" | "desc")}>
+          <option value="desc">Highest / Newest first</option><option value="asc">Lowest / Oldest first</option>
+        </select>
+        <input className="search" type="search" placeholder="Search campaigns…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search campaigns" />
+      </div>
+      <div className="panel" style={{ overflow: "auto" }}>
+        <table className="stable">
+          <thead><tr><th>Campaign</th><th>Date</th><th className="num">Emails Sent</th><th className="num">Open Rate</th><th className="num">Click Rate</th><th className="num">Unique Opens</th><th className="num">Clicks</th></tr></thead>
+          <tbody>
+            {shown.length === 0 && <tr><td colSpan={7} className="empty">No campaigns found for the selected period.</td></tr>}
+            {shown.map((c, i) => (
+              <tr key={`${c.name}-${c.date}-${i}`}>
+                <td><span className="camp-title">{c.name}</span><span className="mc-chip">{fmtInt(c.uniqueOpens)} opens · {fmtInt(c.clicks)} clicks</span></td>
+                <td className="subj">{fmtDate(c.date)}</td>
+                <td className="num">{fmtInt(c.emailsSent)}</td>
+                <td className="num">{fmtPct(c.openRate)}<span className={`rate-pill ${pillCls(c.openRate)}`}>Open</span></td>
+                <td className="num">{fmtPct(c.clickRate)}<span className={`rate-pill ${pillCls(c.clickRate)}`}>Click</span></td>
+                <td className="num">{fmtInt(c.uniqueOpens)}</td>
+                <td className="num">{fmtInt(c.clicks)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }

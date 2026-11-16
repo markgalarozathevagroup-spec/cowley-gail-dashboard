@@ -1,249 +1,180 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LEAD_SEGMENTS, LEAD_STATUSES, type Lead, type LeadStatus } from "@/lib/leadTypes";
+import { LEAD_SEGMENTS, type Lead, type LeadStatus } from "@/lib/leadTypes";
 import { fmtInt } from "@/lib/formatters";
+import { sendJson } from "@/lib/sendJson";
 import { useApi } from "@/lib/useApi";
 import ErrorState from "./ErrorState";
-import Header from "./Header";
 import LoadingState from "./LoadingState";
 
 type StatusFilter = LeadStatus | "All Statuses";
 
-const selectCls = "mt-1 block rounded-lg border-2 border-line bg-white px-3 py-2.5 text-base text-ink";
-
-const ratingCls = (r: string) =>
-  r.toLowerCase() === "hot" ? "bg-coral text-white" : r.toLowerCase() === "warm" ? "bg-warning text-ink" : "bg-line text-ink";
-
-const statusCls = (s: LeadStatus) =>
-  s === "Approved" ? "bg-good text-white" : s === "Not Approved" ? "bg-bad text-white" : "bg-surface text-ink border border-line";
+const segCls = (s: string) => {
+  const v = s.toLowerCase();
+  return v.includes("non-profit") ? "sp-np" : v.includes("health") ? "sp-hc" : v.includes("b2b") ? "sp-b2b" : "sp-def";
+};
+const ratingBadge = (r: string) =>
+  r.toLowerCase() === "hot" ? <span className="hot-b">🔥 Hot</span> : r.toLowerCase() === "warm" ? <span className="warm-b">⚡ Warm</span> : <span className="hint">{r || "—"}</span>;
 
 export default function Leads() {
   const { state, retry } = useApi<{ leads: Lead[] }>("/api/leads", "Leads");
-  return (
-    <>
-      <Header title="Leads" subtitle="Review prospects and approve or decline each one" />
-      {state.status === "loading" && <LoadingState label="Loading Leads…" />}
-      {state.status === "error" && <ErrorState message={`Unable to load Leads. ${state.error}`} onRetry={retry} />}
-      {state.status === "ready" && <Body initial={state.data.leads} />}
-    </>
-  );
+  if (state.status === "loading") return <LoadingState label="Loading Leads…" />;
+  if (state.status === "error") return <ErrorState message={`Unable to load Leads. ${state.error}`} onRetry={retry} />;
+  return <Body initial={state.data.leads} />;
 }
 
 function Body({ initial }: { initial: Lead[] }) {
   const [leads, setLeads] = useState(initial);
   const [segment, setSegment] = useState("All Segments");
   const [status, setStatus] = useState<StatusFilter>("Pending Review");
+  const [q, setQ] = useState("");
   const [openRow, setOpenRow] = useState<number | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState("");
+  const [busyRow, setBusyRow] = useState<number | null>(null);
+  const [error, setError] = useState("");
 
-  const inSegment = useMemo(
-    () => leads.filter((l) => segment === "All Segments" || l.section.toLowerCase() === segment.toLowerCase()),
-    [leads, segment],
+  const inSeg = useMemo(() => leads.filter((l) => segment === "All Segments" || l.section.toLowerCase() === segment.toLowerCase()), [leads, segment]);
+  const count = (s: LeadStatus) => inSeg.filter((l) => l.status === s).length;
+  const rows = inSeg.filter(
+    (l) => (status === "All Statuses" || l.status === status) &&
+      (!q || `${l.company} ${l.decisionMaker} ${l.location} ${l.signal}`.toLowerCase().includes(q.toLowerCase())),
   );
-  const count = (s: LeadStatus) => inSegment.filter((l) => l.status === s).length;
-  const visible = inSegment.filter((l) => status === "All Statuses" || l.status === status);
   const open = leads.find((l) => l.row === openRow) ?? null;
 
-  async function setLeadStatus(lead: Lead, next: LeadStatus) {
-    setSaving(true);
-    setSaveError("");
+  async function act(lead: Lead, next: LeadStatus, closeModal = false) {
+    setBusyRow(lead.row);
+    setError("");
     try {
-      const res = await fetch("/api/leads", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ row: lead.row, leadId: lead.id, status: next }),
-      });
-      const j = await res.json().catch(() => null);
-      if (!res.ok || !j?.success) throw new Error(j?.error || "Unable to save.");
+      await sendJson("/api/leads", "PATCH", { row: lead.row, leadId: lead.id, status: next });
       setLeads((ls) => ls.map((l) => (l.row === lead.row ? { ...l, status: next } : l)));
-      setOpenRow(null);
+      if (closeModal) setOpenRow(null);
     } catch (e) {
-      setSaveError((e as Error).message);
+      setError((e as Error).message);
     } finally {
-      setSaving(false);
+      setBusyRow(null);
     }
   }
 
-  const cards: { label: string; value: number; filter?: StatusFilter }[] = [
-    { label: "Pending Review", value: count("Pending Review"), filter: "Pending Review" },
-    { label: "Hot Leads", value: inSegment.filter((l) => l.rating.toLowerCase() === "hot").length },
-    { label: "Approved", value: count("Approved"), filter: "Approved" },
-    { label: "Not Approved", value: count("Not Approved"), filter: "Not Approved" },
-  ];
+  const stat = (cls: string, v: number, l: string, sub: string, f?: LeadStatus) => {
+    const inner = (<><div className="stat-val" style={{ color: cls }}>{fmtInt(v)}</div><div className="stat-lbl">{l}</div><div className="stat-sub">{sub}</div></>);
+    return f ? <button key={l} className={`stat${status === f ? " active" : ""}`} aria-pressed={status === f} onClick={() => setStatus(f)}>{inner}</button> : <div key={l} className="stat">{inner}</div>;
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {cards.map((c) => {
-          const inner = (
-            <>
-              <span className="block text-base font-semibold text-muted">{c.label}</span>
-              <span className="mt-1 block text-3xl font-bold text-navy">{fmtInt(c.value)}</span>
-            </>
-          );
-          return c.filter ? (
-            <button
-              key={c.label}
-              onClick={() => setStatus(c.filter!)}
-              aria-pressed={status === c.filter}
-              className={`rounded-xl border-2 bg-white p-5 text-left ${status === c.filter ? "border-navy" : "border-line"} hover:border-teal`}
-            >
-              {inner}
-            </button>
-          ) : (
-            <div key={c.label} className="rounded-xl border-2 border-line bg-white p-5">{inner}</div>
-          );
-        })}
+    <>
+      <div className="banner"><span aria-hidden>🎯</span> Review the qualified leads — approve or mark Not Approved for each one.</div>
+      <div className="stat4">
+        {stat("#5a9fa9", count("Pending Review"), "Pending Review", "Awaiting your decision", "Pending Review")}
+        {stat("#f27b5c", inSeg.filter((l) => l.rating.toLowerCase() === "hot").length, "Hot Leads", "Rated Hot")}
+        {stat("#22a35f", count("Approved"), "Approved", "Ready for outreach", "Approved")}
+        {stat("#d34b46", count("Not Approved"), "Not Approved", "Marked by Gail", "Not Approved")}
       </div>
 
-      <div className="flex flex-wrap gap-4 rounded-xl border border-line bg-white p-5">
-        <label className="text-base font-semibold">
-          Segment
-          <select className={selectCls} value={segment} onChange={(e) => setSegment(e.target.value)}>
-            <option>All Segments</option>
-            {LEAD_SEGMENTS.map((s) => <option key={s}>{s}</option>)}
-          </select>
-        </label>
-        <label className="text-base font-semibold">
-          Status
-          <select className={selectCls} value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
-            {LEAD_STATUSES.map((s) => <option key={s}>{s}</option>)}
-            <option>All Statuses</option>
-          </select>
-        </label>
-        <p className="self-end pb-3 text-base text-muted">Showing {fmtInt(visible.length)} of {fmtInt(leads.length)} leads</p>
+      <div className="pill-row">
+        {["All Segments", ...LEAD_SEGMENTS].map((s) => <button key={s} className={`pill${segment === s ? " active" : ""}`} onClick={() => setSegment(s)}>{s}</button>)}
+        <select className="pill-sel" aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
+          <option>Pending Review</option><option>Approved</option><option>Not Approved</option><option>All Statuses</option>
+        </select>
       </div>
+      <input className="search-wide" type="search" placeholder="🔍 Company, contact, location, signal…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search leads" />
+      <div className="count">{fmtInt(rows.length)} leads shown</div>
+      {error && !open && <p role="alert" style={{ color: "var(--bad)", fontWeight: 700 }}>{error}</p>}
 
-      <div className="overflow-x-auto rounded-xl border border-line bg-white">
-        <table className="w-full text-left text-base">
-          <thead className="bg-surface text-sm uppercase tracking-wide text-muted">
-            <tr>
-              <th className="p-4">Company</th>
-              <th className="p-4">Segment</th>
-              <th className="p-4">Decision Maker</th>
-              <th className="p-4 text-right">Score</th>
-              <th className="p-4">Rating</th>
-              <th className="p-4">Buying Signal</th>
-              <th className="p-4">Status</th>
-            </tr>
-          </thead>
+      <div className="panel" style={{ overflow: "auto" }}>
+        <table className="stable">
+          <thead><tr><th>Section</th><th>Company</th><th>Location</th><th>Decision Maker</th><th className="num">Score</th><th>Rating</th><th>Buying Signal</th><th>Action</th></tr></thead>
           <tbody>
-            {visible.length === 0 && (
-              <tr><td colSpan={7} className="p-6 text-muted">No leads match these filters.</td></tr>
-            )}
-            {visible.map((l) => (
-              <tr key={l.row} className="border-t border-line align-top hover:bg-surface/60">
-                <td className="p-4">
-                  <button onClick={() => { setSaveError(""); setOpenRow(l.row); }} className="text-left font-bold text-navy underline decoration-teal underline-offset-4">
-                    {l.company}
-                  </button>
-                  <span className="block text-sm text-muted">{l.location}</span>
+            {rows.length === 0 && <tr><td colSpan={8} className="empty">No leads{q ? ` matching "${q}"` : ""}.</td></tr>}
+            {rows.map((l) => (
+              <tr key={l.row} className="row-clickable" onClick={() => { setError(""); setOpenRow(l.row); }}>
+                <td><span className={`sp ${segCls(l.section)}`}>{l.section || "—"}</span></td>
+                <td><strong>{l.company}</strong><div className="hint">{l.id}</div></td>
+                <td>{l.location || "—"}</td>
+                <td><strong>{l.decisionMaker || "—"}</strong><div className="hint">{l.title}</div></td>
+                <td className="num">{l.score || "—"} ⚡</td>
+                <td>{ratingBadge(l.rating)}</td>
+                <td><span className="sig-snip">{l.signal.length > 90 ? `${l.signal.slice(0, 87)}...` : l.signal || "—"}</span></td>
+                <td style={{ minWidth: 120 }} onClick={(e) => e.stopPropagation()}>
+                  {l.status === "Pending Review" ? (
+                    <>
+                      <button className="btn-app" disabled={busyRow === l.row} onClick={() => act(l, "Approved")}>✓ Approve</button>
+                      <button className="btn-rej" disabled={busyRow === l.row} onClick={() => act(l, "Not Approved")}>Not Approved</button>
+                    </>
+                  ) : (
+                    <>
+                      <span className={l.status === "Approved" ? "st-app" : "st-rej"}>{l.status === "Approved" ? "✓ Approved" : "✕ Not Approved"}</span>
+                      <button className="btn-undo-s" disabled={busyRow === l.row} onClick={() => act(l, "Pending Review")}>Undo</button>
+                    </>
+                  )}
                 </td>
-                <td className="p-4">{l.section}</td>
-                <td className="p-4">{l.decisionMaker}<span className="block text-sm text-muted">{l.title}</span></td>
-                <td className="p-4 text-right font-semibold">{l.score || "—"}</td>
-                <td className="p-4"><span className={`rounded-full px-3 py-1 text-sm font-bold ${ratingCls(l.rating)}`}>{l.rating || "—"}</span></td>
-                <td className="p-4 max-w-sm">{l.signal}</td>
-                <td className="p-4"><span className={`whitespace-nowrap rounded-full px-3 py-1 text-sm font-bold ${statusCls(l.status)}`}>{l.status}</span></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-
-      {open && (
-        <LeadModal lead={open} saving={saving} error={saveError} onClose={() => setOpenRow(null)} onSet={(s) => setLeadStatus(open, s)} />
-      )}
-    </div>
+      {open && <LeadModal lead={open} busy={busyRow === open.row} error={error} onClose={() => setOpenRow(null)} onAct={(s) => act(open, s, true)} />}
+    </>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Fld({ label, children, full }: { label: string; children: React.ReactNode; full?: boolean }) {
   if (!children) return null;
-  return (
-    <div>
-      <dt className="text-sm font-bold uppercase tracking-wide text-muted">{label}</dt>
-      <dd className="mt-0.5 text-base text-ink">{children}</dd>
-    </div>
-  );
+  return <div className={`mf${full ? " full" : ""}`}><div className="mf-lbl">{label}</div><div className="mf-val">{children}</div></div>;
 }
 
-function LeadModal({ lead, saving, error, onClose, onSet }: {
-  lead: Lead; saving: boolean; error: string; onClose: () => void; onSet: (s: LeadStatus) => void;
-}) {
+function LeadModal({ lead, busy, error, onClose, onAct }: { lead: Lead; busy: boolean; error: string; onClose: () => void; onAct: (s: LeadStatus) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     ref.current?.focus();
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("keydown", onKey); prev?.focus(); };
+    document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = ""; prev?.focus(); };
   }, [onClose]);
-
   const site = lead.website ? (lead.website.startsWith("http") ? lead.website : `https://${lead.website}`) : "";
+  const wp = lead.webPresence.toLowerCase();
+  const hasPitch = lead.webPresence || lead.gaps || lead.competitors || lead.services || lead.pitch;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-white/80 p-4 sm:p-8" onClick={onClose} style={{ colorScheme: "light" }}>
-      <div
-        ref={ref}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="lead-title"
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-3xl rounded-2xl border-2 border-navy bg-white p-6 text-ink shadow-xl outline-none sm:p-8"
-      >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-sm font-bold text-muted">Lead {lead.id}</p>
-            <h2 id="lead-title" className="text-2xl font-bold text-navy">{lead.company}</h2>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <span className={`rounded-full px-3 py-1 text-sm font-bold ${ratingCls(lead.rating)}`}>{lead.rating}</span>
-              <span className={`rounded-full px-3 py-1 text-sm font-bold ${statusCls(lead.status)}`}>{lead.status}</span>
+    <div className="modal-overlay" onClick={onClose}>
+      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="lead-title" className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div className="m-id">{lead.id}</div>
+          <div className="m-info">
+            <h3 id="lead-title">{lead.company}</h3>
+            <div className="m-meta">{ratingBadge(lead.rating)}<span>{lead.location}</span></div>
+          </div>
+          <button className="m-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="m-fields">
+          <Fld label="Section">{lead.section}</Fld>
+          <Fld label="Lead Score">{lead.score ? <span className="m-score">{lead.score}/20</span> : ""}</Fld>
+          <Fld label="Decision Maker">{lead.decisionMaker}</Fld>
+          <Fld label="Title">{lead.title}</Fld>
+          <Fld label="Location">{lead.location}</Fld>
+          <Fld label="Est. Revenue">{lead.revenue}</Fld>
+          <Fld label="Contact" full>{lead.contact}</Fld>
+          <Fld label="Key Buying Signal" full>{lead.signal}</Fld>
+          <Fld label="Website" full>{site && <a href={site} target="_blank" rel="noopener noreferrer">{lead.website}</a>}</Fld>
+        </div>
+        {hasPitch && (
+          <div className="m-pitch">
+            <div className="m-pitch-hdr">Pitch Intelligence</div>
+            <div className="pf-grid">
+              <div className="pf"><div className="pf-lbl">Web Presence</div><div className={`pf-val ${wp === "strong" ? "wp-strong" : wp === "moderate" ? "wp-moderate" : "wp-weak"}`}>{lead.webPresence}</div></div>
+              <div className="pf"><div className="pf-lbl">Cowley Services Match</div><div>{lead.services.split("·").map((s) => s.trim()).filter(Boolean).map((s) => <span key={s} className="svc-pill">{s}</span>)}</div></div>
+              <div className="pf full"><div className="pf-lbl">Key Website Gaps</div><div className="pf-val">{lead.gaps}</div></div>
+              <div className="pf full"><div className="pf-lbl">Top Competitors</div><div className="pf-val">{lead.competitors}</div></div>
+              <div className="pf full"><div className="pf-lbl">Recommended Pitch Angle</div><div className="pf-val">{lead.pitch}</div></div>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-lg border-2 border-line px-4 py-2 text-base font-semibold hover:bg-surface">Close</button>
+        )}
+        {error && <p role="alert" style={{ color: "#c5473d", fontWeight: 700, padding: "10px 18px 0", margin: 0 }}>{error}</p>}
+        <div className="m-actions">
+          <button className="m-btn approve" disabled={busy} onClick={() => onAct("Approved")}>✓ Approve</button>
+          <button className="m-btn reject" disabled={busy} onClick={() => onAct("Not Approved")}>✕ Not Approved</button>
         </div>
-
-        <dl className="mt-6 grid gap-5 sm:grid-cols-2">
-          <Field label="Section">{lead.section}</Field>
-          <Field label="Lead Score">{lead.score ? `${lead.score} / 20` : ""}</Field>
-          <Field label="Decision Maker">{lead.decisionMaker}</Field>
-          <Field label="Title">{lead.title}</Field>
-          <Field label="Location">{lead.location}</Field>
-          <Field label="Estimated Revenue">{lead.revenue}</Field>
-          <Field label="Contact">{lead.contact}</Field>
-          <Field label="Website">{site && <a href={site} target="_blank" rel="noopener noreferrer" className="font-semibold text-navy underline">{lead.website}</a>}</Field>
-          <Field label="Web Presence">{lead.webPresence}</Field>
-          <Field label="Cowley Services Match">{lead.services}</Field>
-        </dl>
-        <dl className="mt-5 space-y-5">
-          <Field label="Buying Signal">{lead.signal}</Field>
-          <Field label="Website Gaps">{lead.gaps}</Field>
-          <Field label="Competitors">{lead.competitors}</Field>
-          <Field label="Recommended Pitch Angle">{lead.pitch}</Field>
-        </dl>
-
-        {error && <p role="alert" className="mt-5 font-semibold text-bad">{error}</p>}
-        <div className="mt-8 grid gap-4 sm:grid-cols-2">
-          <button
-            disabled={saving}
-            onClick={() => onSet("Approved")}
-            className="rounded-xl bg-good px-6 py-5 text-xl font-bold text-white hover:opacity-90 disabled:opacity-50"
-          >
-            ✓ Approve
-          </button>
-          <button
-            disabled={saving}
-            onClick={() => onSet("Not Approved")}
-            className="rounded-xl bg-bad px-6 py-5 text-xl font-bold text-white hover:opacity-90 disabled:opacity-50"
-          >
-            ✕ Not Approved
-          </button>
-        </div>
-        {saving && <p className="mt-3 text-base text-muted">Saving to Google Sheets…</p>}
       </div>
     </div>
   );

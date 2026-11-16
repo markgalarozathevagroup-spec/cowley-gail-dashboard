@@ -14,9 +14,19 @@ export interface HubspotCompany {
   created: string;
 }
 
+export interface HubspotContact {
+  name: string;
+  title: string;
+  company: string;
+  city: string;
+  stage: string;
+  email: string;
+}
+
 export interface HubspotData {
   companies: number;
   contacts: number;
+  contactList: HubspotContact[];
   lifecycle: Record<string, number>;
   companyList: HubspotCompany[];
 }
@@ -61,8 +71,18 @@ export async function GET() {
       lifecycle[k] = (lifecycle[k] ?? 0) + 1;
     }
     // HubSpot's built-in "(Sample Contact)" records are not real contacts.
-    const contacts = (cont?.data ?? []).filter((r) => !/sample contact/i.test(r.join(" "))).length;
-    const data: HubspotData = { companies: companyList.length, contacts, lifecycle, companyList };
+    const cc = (r: string[], name: string) => (r[col(cont?.header ?? [], name)] ?? "").trim();
+    const contactList: HubspotContact[] = (cont?.data ?? [])
+      .filter((r) => !/sample contact/i.test(r.join(" ")))
+      .map((r) => ({
+        name: `${cc(r, "First Name")} ${cc(r, "Last Name")}`.trim(),
+        title: cc(r, "Title"),
+        company: cc(r, "Company"),
+        city: cc(r, "City"),
+        stage: cc(r, "Stage"),
+        email: cc(r, "Email"),
+      }));
+    const data: HubspotData = { companies: companyList.length, contacts: contactList.length, contactList, lifecycle, companyList };
     return ok(data);
   } catch (e) {
     console.error("[api/hubspot]", e);

@@ -13,30 +13,35 @@ export const NAV = [
   {
     group: "Workspace",
     items: [
-      { label: "Overview", href: "/", icon: "home" },
-      { label: "Mailchimp", href: "/mailchimp", icon: "mail" },
-      { label: "Hubspot", href: "/hubspot", icon: "users" },
-      { label: "Sales & Hours", href: "/sales-hours", icon: "dollar" },
+      { label: "Overview", href: "/", icon: "📊" },
+      { label: "Mailchimp", href: "/mailchimp", icon: "✉️" },
+      { label: "Hubspot", href: "/hubspot", icon: "🧩" },
+      { label: "Sales & Hours", href: "/sales-hours", icon: "💰" },
     ],
   },
   {
     group: "Outreach",
     items: [
-      { label: "Leads", href: "/leads", icon: "target" },
-      { label: "Campaign Calendar", href: "/campaign-calendar", icon: "calendar" },
+      { label: "Leads", href: "/leads", icon: "👥" },
+      { label: "Campaign Calendar", href: "/campaign-calendar", icon: "📅" },
     ],
   },
   {
     group: "Documents",
-    items: [{ label: "Document Library", href: "/documents", icon: "file" },
-      { label: "Gail Approval", href: "/gail-approval", icon: "check" },
-    ],
+    items: [{ label: "Document Library", href: "/documents", icon: "📄" }],
   },
 ] as const;
 
-export type IconName = (typeof NAV)[number]["items"][number]["icon"];
+export const PAGES: Record<string, { title: string; hint: string }> = {
+  "/": { title: "Overview", hint: "Live summary of all marketing activity" },
+  "/mailchimp": { title: "Mailchimp", hint: "Audience growth, opens, clicks, and recent campaigns" },
+  "/hubspot": { title: "HubSpot", hint: "CRM contacts and companies" },
+  "/sales-hours": { title: "Sales & Hours", hint: "Revenue by customer and Function Fox project hours" },
+  "/leads": { title: "Leads", hint: "Click any row to view full lead details and approve or reject" },
+  "/campaign-calendar": { title: "Campaign Calendar", hint: "Planned campaigns by segment and month" },
+  "/documents": { title: "Documents", hint: "Document links, purpose, and approval status for Gail" },
+};
 
-/** Campaigns whose names contain these words never count as "best campaign". */
 /** A campaign must reach at least this many people to be called a "best" campaign. */
 export const MIN_BEST_CAMPAIGN_SENT = 100;
 

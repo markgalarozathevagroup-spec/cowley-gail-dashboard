@@ -1,5 +1,11 @@
 import DocumentLibrary from "@/components/DocumentLibrary";
+import GailApproval from "@/components/GailApproval";
 
 export default function Page() {
-  return <DocumentLibrary />;
+  return (
+    <>
+      <GailApproval />
+      <DocumentLibrary />
+    </>
+  );
 }
