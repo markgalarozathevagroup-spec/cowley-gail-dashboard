@@ -6,6 +6,7 @@ import type { HubspotPage } from "@/app/api/hubspot/route";
 import { fmtInt } from "@/lib/formatters";
 import { initials, recordName } from "@/lib/hubspotUi";
 import ErrorState from "./ErrorState";
+import HubspotCreate from "./HubspotCreate";
 
 type Tab = "company" | "contact";
 type Col = { key: string; label: string; sort?: string; kind?: "enum" | "date" | "email" | "phone" };
@@ -57,6 +58,7 @@ export default function Hubspot() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [tries, setTries] = useState(0);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => { setApplied(q.trim()); setPage(0); }, 350);
@@ -102,6 +104,7 @@ export default function Hubspot() {
         </select>
         <span className="spacer" />
         <span className="hint" role="status">{loading ? "Loading from HubSpot…" : "Live from HubSpot"}</span>
+        <button className="hs-save" onClick={() => setCreating(true)} disabled={!data}>+ Create {tab === "contact" ? "contact" : "company"}</button>
       </div>
       <div className="hs-tabs"><div className="hs-tab">All {noun}</div></div>
 
@@ -123,6 +126,7 @@ export default function Hubspot() {
         </select>
       </div>
 
+      {creating && data && <HubspotCreate type={tab} options={data.options} onClose={() => setCreating(false)} />}
       {error && <div style={{ padding: "0 22px 18px" }}><ErrorState message={`Unable to load HubSpot data. ${error}`} onRetry={reload} /></div>}
       {!error && (
         <>

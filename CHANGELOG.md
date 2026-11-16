@@ -63,3 +63,7 @@
 - New record page `/hubspot/{contacts|companies}/{id}` laid out like HubSpot (left: header + Key information; centre: About tab + profile card; right: associated companies/contacts). Each card has its own Edit button and edits/saves only that card to HubSpot, with a banner naming the card being edited
 - `PATCH /api/hubspot` now takes `{type, id, properties}`; every field is validated (allowed fields only, email / phone / domain formats, enum choices, length)
 - Not included (needs extra HubSpot permissions): owners, deals, tickets, activity timeline. The Activities tab and "Open in HubSpot" link out to HubSpot
+
+### Create contacts and companies
+- "+ Create contact" / "+ Create company" button on the Hubspot list opens a form (light modal, Escape to close) and adds the record to HubSpot, then opens its record page
+- `POST /api/hubspot`: same field checks as edits; requires an email or name (contacts) or a name or domain (companies); refuses duplicates (existing email or domain) and links to the existing record

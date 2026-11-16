@@ -3,7 +3,7 @@ import "server-only";
 const BASE = "https://api.hubapi.com";
 
 export class HubspotError extends Error {
-  constructor(message: string, public status = 502) {
+  constructor(message: string, public status = 502, public existingId?: string) {
     super(message);
   }
 }
@@ -19,6 +19,10 @@ async function hs<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     console.error("[hubspot]", res.status, path, body.slice(0, 300));
+    if (res.status === 409) {
+      const m = body.match(/Existing ID:\s*(\d+)/i);
+      throw new HubspotError("HubSpot already has a record like this.", 409, m?.[1]);
+    }
     throw new HubspotError(res.status === 401 || res.status === 403 ? "HubSpot rejected the access token." : `HubSpot returned an error (${res.status}).`, 502);
   }
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
@@ -116,16 +120,14 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE = /^[0-9+()\-.\s]{0,40}$/;
 const DOMAIN = /^([a-z0-9-]+\.)+[a-z]{2,}$/;
 
-/** Change several fields on one record; every field is checked against the card definitions first. */
-export async function updateFields(type: ObjType, id: string, props: Record<string, string>) {
-  if (!/^\d{1,20}$/.test(id)) throw new HubspotError("Invalid record id.", 400);
+async function cleanProps(type: ObjType, props: Record<string, string>, max = 12): Promise<Record<string, string>> {
   const entries = Object.entries(props);
-  if (!entries.length || entries.length > 12) throw new HubspotError("Nothing to update.", 400);
+  if (!entries.length || entries.length > max) throw new HubspotError("Nothing to save.", 400);
   const options = await enumOptions(type);
   const clean: Record<string, string> = {};
   for (const [key, raw] of entries) {
     const f = KIND(type, key);
-    if (!f || !["text", "enum", "email", "phone", "domain"].includes(f.kind)) throw new HubspotError(`"${key}" cannot be changed from the dashboard.`, 400);
+    if (!f || !["text", "enum", "email", "phone", "domain"].includes(f.kind)) throw new HubspotError(`"${key}" cannot be set from the dashboard.`, 400);
     if (typeof raw !== "string" || raw.length > 200) throw new HubspotError(`${f.label} is too long.`, 400);
     const v = raw.trim();
     if (v !== "") {
@@ -136,7 +138,37 @@ export async function updateFields(type: ObjType, id: string, props: Record<stri
     }
     clean[key] = f.kind === "domain" ? v.toLowerCase() : v;
   }
+  return clean;
+}
+
+/** Change several fields on one record; every field is checked against the card definitions first. */
+export async function updateFields(type: ObjType, id: string, props: Record<string, string>) {
+  if (!/^\d{1,20}$/.test(id)) throw new HubspotError("Invalid record id.", 400);
+  const clean = await cleanProps(type, props);
   await hs(`/crm/v3/objects/${PATH[type]}/${id}`, { method: "PATCH", body: JSON.stringify({ properties: clean }) });
+}
+
+// HubSpot's search index lags a few seconds behind new records, so remember what we just created.
+const recentDomains = new Map<string, { id: string; at: number }>();
+
+/** Create a company or contact. Blank values are dropped; duplicates are refused. */
+export async function createRecord(type: ObjType, props: Record<string, string>): Promise<string> {
+  const filled = Object.fromEntries(Object.entries(props).filter(([, v]) => typeof v !== "string" || v.trim() !== ""));
+  const clean = await cleanProps(type, filled, 14);
+  if (type === "company" && !clean.name && !clean.domain) throw new HubspotError("Please enter a company name or domain.", 400);
+  if (type === "contact" && !clean.email && !clean.firstname && !clean.lastname) throw new HubspotError("Please enter an email address or a name.", 400);
+  if (type === "company" && clean.domain) {
+    const recent = recentDomains.get(clean.domain);
+    if (recent && Date.now() - recent.at < 120_000) throw new HubspotError("A company with that domain already exists in HubSpot.", 409, recent.id);
+    const r = await hs<{ total: number; results: { id: string }[] }>("/crm/v3/objects/companies/search", {
+      method: "POST",
+      body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: "domain", operator: "EQ", value: clean.domain }] }], limit: 1 }),
+    });
+    if (r.total > 0) throw new HubspotError("A company with that domain already exists in HubSpot.", 409, r.results[0].id);
+  }
+  const rec = await hs<{ id: string }>(`/crm/v3/objects/${PATH[type]}`, { method: "POST", body: JSON.stringify({ properties: clean }) });
+  if (type === "company" && clean.domain) recentDomains.set(clean.domain, { id: rec.id, at: Date.now() });
+  return rec.id;
 }
 
 export interface Related { id: string; name: string; sub: string }

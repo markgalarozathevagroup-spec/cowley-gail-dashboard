@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import { ok, fail } from "@/lib/api";
-import { HubspotError, PAGE_SIZES, SORTABLE, enumOptions, recordUrl, searchPage, totals, updateFields, type HsRecord, type ObjType } from "@/lib/hubspot";
+import { HubspotError, PAGE_SIZES, createRecord, SORTABLE, enumOptions, recordUrl, searchPage, totals, updateFields, type HsRecord, type ObjType } from "@/lib/hubspot";
 
 export const maxDuration = 30;
 
@@ -69,5 +70,27 @@ export async function PATCH(req: NextRequest) {
   } catch (e) {
     console.error("[api/hubspot PATCH]", e);
     return fail(errMsg(e, "Unable to save the change to HubSpot."), errStatus(e));
+  }
+}
+
+/** Body: { type: "company"|"contact", properties: { [field]: string } } — creates a record in HubSpot. */
+export async function POST(req: NextRequest) {
+  let b: { type?: unknown; properties?: unknown };
+  try {
+    b = await req.json();
+  } catch {
+    return fail("Invalid request body.", 400);
+  }
+  if (b.type !== "company" && b.type !== "contact") return fail("Invalid record type.", 400);
+  if (typeof b.properties !== "object" || b.properties === null || Array.isArray(b.properties)) return fail("Invalid request.", 400);
+  try {
+    const id = await createRecord(b.type, b.properties as Record<string, string>);
+    return ok({ id });
+  } catch (e) {
+    console.error("[api/hubspot POST]", e);
+    if (e instanceof HubspotError && e.status === 409) {
+      return NextResponse.json({ success: false, error: e.message, existingId: e.existingId }, { status: 409 });
+    }
+    return fail(errMsg(e, "Unable to create the record in HubSpot."), errStatus(e));
   }
 }
