@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import GailApproval from "@/components/GailApproval";
 
 export default function Page() {
-  redirect("/documents");
+  return <GailApproval />;
 }

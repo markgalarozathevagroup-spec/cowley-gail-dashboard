@@ -67,3 +67,6 @@
 ### Create contacts and companies
 - "+ Create contact" / "+ Create company" button on the Hubspot list opens a form (light modal, Escape to close) and adds the record to HubSpot, then opens its record page
 - `POST /api/hubspot`: same field checks as edits; requires an email or name (contacts) or a name or domain (companies); refuses duplicates (existing email or domain) and links to the existing record
+
+### Documents split
+- Document Library (`/documents`) and Gail Approval (`/gail-approval`) are separate pages, each with its own item under the Documents group in the sidebar

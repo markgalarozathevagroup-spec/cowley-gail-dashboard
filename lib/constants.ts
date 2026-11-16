@@ -28,7 +28,10 @@ export const NAV = [
   },
   {
     group: "Documents",
-    items: [{ label: "Document Library", href: "/documents", icon: "📄" }],
+    items: [
+      { label: "Document Library", href: "/documents", icon: "📄" },
+      { label: "Gail Approval", href: "/gail-approval", icon: "✅" },
+    ],
   },
 ] as const;
 
@@ -39,7 +42,8 @@ export const PAGES: Record<string, { title: string; hint: string }> = {
   "/sales-hours": { title: "Sales & Hours", hint: "Revenue by customer and Function Fox project hours" },
   "/leads": { title: "Leads", hint: "Click any row to view full lead details and approve or reject" },
   "/campaign-calendar": { title: "Campaign Calendar", hint: "Planned campaigns by segment and month" },
-  "/documents": { title: "Documents", hint: "Document links, purpose, and approval status for Gail" },
+  "/documents": { title: "Document Library", hint: "Document links, purpose, and approval status for Gail" },
+  "/gail-approval": { title: "Gail Approval", hint: "Items from EOD / EOW reports that need Gail's review, decision, or approval" },
 };
 
 /** A campaign must reach at least this many people to be called a "best" campaign. */

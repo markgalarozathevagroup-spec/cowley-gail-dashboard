@@ -14,7 +14,7 @@ const CLS: Record<GailStatus, string> = { "Needs Gail": "pending needs", "In Rev
 export default function GailApproval() {
   const { state, retry } = useApi<{ items: GailItem[] }>("/api/gail-approval", "Gail Approval");
   return (
-    <section aria-label="Gail Approval" style={{ marginBottom: 28 }}>
+    <section aria-label="Gail Approval">
       <div className="sec-h" style={{ marginTop: 0 }}><h2 style={{ fontSize: 16 }}>Gail Approval</h2><span className="hint">Items from EOD / EOW reports that need Gail&apos;s review, decision, or approval</span></div>
       {state.status === "loading" && <LoadingState label="Loading Gail Approval…" cards={4} />}
       {state.status === "error" && <ErrorState message={`Unable to load Gail Approval. ${state.error}`} onRetry={retry} />}
