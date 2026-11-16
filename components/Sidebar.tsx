@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useSyncExternalStore } from "react";
 import { NAV } from "@/lib/constants";
 
@@ -16,6 +16,7 @@ const subscribe = (cb: () => void) => {
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const dark = useSyncExternalStore(subscribe, readDark, () => false);
 
   useEffect(() => {
@@ -49,6 +50,10 @@ export default function Sidebar() {
           </div>
         ))}
       </nav>
+      <button className="navitem" style={{ margin: "0 8px 4px", width: "auto" }} onClick={async () => { await fetch("/api/logout", { method: "POST" }); router.replace("/login");
+          router.refresh(); }}>
+        <span className="ic" aria-hidden>🔒</span>Sign out
+      </button>
       <div className="theme-toggle">
         <button className={`thmbtn${!dark ? " on" : ""}`} onClick={() => choose(false)}>☀️ Light</button>
         <button className={`thmbtn${dark ? " on" : ""}`} onClick={() => choose(true)}>🌙 Dark</button>

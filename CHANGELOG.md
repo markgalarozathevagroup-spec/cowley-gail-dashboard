@@ -45,3 +45,8 @@
 - Gail Approval moved onto the Documents page (as in the Apps Script version); `/gail-approval` redirects there
 - Sidebar becomes a top bar on narrow screens instead of disappearing
 - Kept live-data behaviour: independent loading per section, error + Retry states, write-back to the sheets. Observation flags are calculated, not hard-coded. PDF upload to Drive was not ported (Apps Script only).
+
+### Login
+- Shared-password sign-in for the whole dashboard (`proxy.ts`, `/login`, `/api/login`, `/api/logout`); pages redirect to the login page and `/api/*` returns 401 until signed in
+- Session cookie is HttpOnly, 30 days, derived from `DASHBOARD_PASSWORD` + `AUTH_SECRET` (changing the password signs everyone out); production fails closed if either is missing
+- "Sign out" button in the sidebar
