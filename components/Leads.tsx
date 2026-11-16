@@ -32,6 +32,7 @@ function Body({ initial }: { initial: Lead[] }) {
   const [openRow, setOpenRow] = useState<number | null>(null);
   const [busyRow, setBusyRow] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [note, setNote] = useState("");
 
   const inSeg = useMemo(() => leads.filter((l) => segment === "All Segments" || l.section.toLowerCase() === segment.toLowerCase()), [leads, segment]);
   const count = (s: LeadStatus) => inSeg.filter((l) => l.status === s).length;
@@ -44,8 +45,15 @@ function Body({ initial }: { initial: Lead[] }) {
   async function act(lead: Lead, next: LeadStatus, closeModal = false) {
     setBusyRow(lead.row);
     setError("");
+    setNote("");
     try {
-      await sendJson("/api/leads", "PATCH", { row: lead.row, leadId: lead.id, status: next });
+      const res = await sendJson<{ hubspot?: { status: string; detail?: string } }>("/api/leads", "PATCH", { row: lead.row, leadId: lead.id, status: next });
+      const h = res.hubspot;
+      setNote(
+        h?.status === "updated" ? `Saved. ${lead.company} was also updated in HubSpot.`
+          : h ? `Saved to the sheet. HubSpot was not changed: ${h.detail ?? h.status}`
+          : "Saved.",
+      );
       setLeads((ls) => ls.map((l) => (l.row === lead.row ? { ...l, status: next } : l)));
       if (closeModal) setOpenRow(null);
     } catch (e) {
@@ -79,6 +87,7 @@ function Body({ initial }: { initial: Lead[] }) {
       <input className="search-wide" type="search" placeholder="🔍 Company, contact, location, signal…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search leads" />
       <div className="count">{fmtInt(rows.length)} leads shown</div>
       {error && !open && <p role="alert" style={{ color: "var(--bad)", fontWeight: 700 }}>{error}</p>}
+      {note && <p role="status" style={{ color: "var(--brand-ink)", fontWeight: 700, margin: "0 0 8px" }}>{note}</p>}
 
       <div className="panel" style={{ overflow: "auto" }}>
         <table className="stable">

@@ -50,3 +50,10 @@
 - Shared-password sign-in for the whole dashboard (`proxy.ts`, `/login`, `/api/login`, `/api/logout`); pages redirect to the login page and `/api/*` returns 401 until signed in
 - Session cookie is HttpOnly, 30 days, derived from `DASHBOARD_PASSWORD` + `AUTH_SECRET` (changing the password signs everyone out); production fails closed if either is missing
 - "Sign out" button in the sidebar
+
+### HubSpot as the live source
+- `/api/hubspot` now reads Cowley's HubSpot directly (server-side search, sort and paging, 50 per page); the old sheet-based Hubspot tab is no longer used
+- Hubspot page: live companies and contacts, search, sortable columns, links to the HubSpot record, and editing saved straight to HubSpot (company: lead status, lifecycle, project status, industry, city, state; contact: title, company, lifecycle). Only those fields can be changed; enum values are checked against HubSpot's allowed options
+- Leads: Approve / Not Approved also sets the new company property "Dashboard Approval Status" on the HubSpot company with the same website domain (never creates companies; says when none or several match)
+- Overview "HubSpot Companies" now comes from HubSpot totals
+- New env var: `HUBSPOT_ACCESS_TOKEN`

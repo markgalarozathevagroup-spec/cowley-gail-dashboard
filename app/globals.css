@@ -279,3 +279,4 @@ body.dark .flags { background: #3a2c2a; border-color: #7a4b42; } body.dark .flag
 body.dark .detail-table tbody tr:nth-child(-n + 3) td { background: #273a36; } body.dark .detail-table tbody tr.unbilled td { background: #3b2b2a; } body.dark .detail-table td:nth-child(2) { color: #d9eef2; }
 body.dark .banner { background: #263c3f; border-color: #355b62; } body.dark .bar { background: #34464d; } body.dark .sp-table td { border-color: #334249; color: #c9d5d8; } body.dark .prev-track { background: #34464d; }
 body.dark .modal-card, body.dark .modal-head, body.dark .mf, body.dark .m-actions { background: #fff; color: #263238; }
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}

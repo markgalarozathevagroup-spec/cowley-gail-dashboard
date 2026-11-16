@@ -3,6 +3,7 @@ import { readTab, writeCell } from "@/lib/googleSheets";
 import { SHEET_TABS } from "@/lib/constants";
 import { ok, fail } from "@/lib/api";
 import { parseNumber } from "@/lib/formatters";
+import { syncLeadApproval } from "@/lib/hubspot";
 import { LEAD_STATUSES, normalizeStatus, type Lead, type LeadStatus } from "@/lib/leadTypes";
 
 const COLS = {
@@ -98,7 +99,10 @@ export async function PATCH(req: NextRequest) {
       return fail("That lead has moved or changed in the sheet. Please refresh and try again.", 409);
     }
     await writeCell(SHEET_TABS.leads, idx.status, row, b.status as string);
-    return ok({ row, status: b.status });
+    // Sheet is saved; now mirror the decision onto the matching HubSpot company (never fails the request).
+    const websiteCol = rows[0].findIndex((h) => h.trim().toLowerCase() === "website");
+    const hubspot = await syncLeadApproval(websiteCol >= 0 ? target[websiteCol] ?? "" : "", b.status as LeadStatus);
+    return ok({ row, status: b.status, hubspot });
   } catch (e) {
     console.error("[api/leads PATCH]", e);
     return fail("Unable to save the change to Google Sheets.");

@@ -1,7 +1,7 @@
 "use client";
 
 import type { CalendarItem } from "@/app/api/campaign-calendar/route";
-import type { HubspotData } from "@/app/api/hubspot/route";
+import type { HubspotSummary } from "@/app/api/hubspot/route";
 import type { MailchimpData } from "@/app/api/mailchimp/route";
 import type { GailItem } from "@/lib/docTypes";
 import type { Lead } from "@/lib/leadTypes";
@@ -41,7 +41,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${fmtInt(n)} ${n =
 
 export default function Overview() {
   const mc = useApi<MailchimpData>("/api/mailchimp", "Mailchimp");
-  const hs = useApi<HubspotData>("/api/hubspot", "Hubspot");
+  const hs = useApi<HubspotSummary>("/api/hubspot?summary=1", "Hubspot");
   const leads = useApi<{ leads: Lead[] }>("/api/leads", "Leads");
   const sales = useApi<SalesHoursData>("/api/sales-hours", "Sales & Hours");
   const gail = useApi<{ items: GailItem[] }>("/api/gail-approval", "Gail Approval");
