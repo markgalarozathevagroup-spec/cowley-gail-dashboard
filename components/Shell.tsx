@@ -13,7 +13,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <Topbar />
         <div className="scroll">{children}</div>
         <footer className="foot">
-          <span>Live Google Sheets</span>
+          <span>Live data: Google Sheets & HubSpot</span>
           <span className="spacer" />
           <span>Cowley Associates · Gail&apos;s Dashboard</span>
         </footer>

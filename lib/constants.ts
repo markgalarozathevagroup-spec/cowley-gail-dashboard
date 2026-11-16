@@ -35,7 +35,7 @@ export const NAV = [
 export const PAGES: Record<string, { title: string; hint: string }> = {
   "/": { title: "Overview", hint: "Live summary of all marketing activity" },
   "/mailchimp": { title: "Mailchimp", hint: "Audience growth, opens, clicks, and recent campaigns" },
-  "/hubspot": { title: "HubSpot", hint: "CRM contacts and companies" },
+  "/hubspot": { title: "HubSpot", hint: "Live CRM contacts and companies. Open a record to edit it" },
   "/sales-hours": { title: "Sales & Hours", hint: "Revenue by customer and Function Fox project hours" },
   "/leads": { title: "Leads", hint: "Click any row to view full lead details and approve or reject" },
   "/campaign-calendar": { title: "Campaign Calendar", hint: "Planned campaigns by segment and month" },

@@ -57,3 +57,9 @@
 - Leads: Approve / Not Approved also sets the new company property "Dashboard Approval Status" on the HubSpot company with the same website domain (never creates companies; says when none or several match)
 - Overview "HubSpot Companies" now comes from HubSpot totals
 - New env var: `HUBSPOT_ACCESS_TOKEN`
+
+### HubSpot-style views
+- Hubspot list now mirrors HubSpot's index: object switch (Contacts / Companies), "All contacts" view tab, search, lifecycle-stage and lead-status filters, sort, HubSpot's default columns, numbered pagination and 25/50/100 per page
+- New record page `/hubspot/{contacts|companies}/{id}` laid out like HubSpot (left: header + Key information; centre: About tab + profile card; right: associated companies/contacts). Each card has its own Edit button and edits/saves only that card to HubSpot, with a banner naming the card being edited
+- `PATCH /api/hubspot` now takes `{type, id, properties}`; every field is validated (allowed fields only, email / phone / domain formats, enum choices, length)
+- Not included (needs extra HubSpot permissions): owners, deals, tickets, activity timeline. The Activities tab and "Open in HubSpot" link out to HubSpot
