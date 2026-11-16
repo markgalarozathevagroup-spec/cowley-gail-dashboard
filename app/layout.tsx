@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import "./globals.css";
 import Shell from "@/components/Shell";
 
@@ -11,7 +12,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <Shell>{children}</Shell>
+        <Suspense fallback={null}>
+          <Shell>{children}</Shell>
+        </Suspense>
       </body>
     </html>
   );
