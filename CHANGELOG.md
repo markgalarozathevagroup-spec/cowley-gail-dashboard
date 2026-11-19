@@ -70,3 +70,6 @@
 
 ### Documents split
 - Document Library (`/documents`) and Gail Approval (`/gail-approval`) are separate pages, each with its own item under the Documents group in the sidebar
+
+### Browser tab icon
+- Replaced the default Next.js icon with the Cowley "C" mark (`app/icon.png`, `app/apple-icon.png`), cropped from the logo
